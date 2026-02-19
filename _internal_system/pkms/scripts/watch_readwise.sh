@@ -1,7 +1,7 @@
 #!/bin/bash
 # Readwise 파일 도착 감시 스크립트
 
-GDRIVE_ROOT="/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브"
+GDRIVE_ROOT="/Users/arian/GDrive"
 CHECK_INTERVAL=10  # 10초마다 체크
 MAX_CHECKS=180     # 최대 30분 (180 * 10초)
 

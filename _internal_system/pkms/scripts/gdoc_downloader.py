@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple
+from dotenv import load_dotenv
 
 # 로깅 설정
 logging.basicConfig(
@@ -20,7 +21,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-INBOX_READWISE = Path("/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/readwise")
+# .env 로드
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+INBOX_READWISE = Path(os.getenv("ROOT_PATH", "/Users/arian/GDrive/NotebookLM_Staging")) / "00_INBOX/readwise"
 
 
 class GDocDownloader:

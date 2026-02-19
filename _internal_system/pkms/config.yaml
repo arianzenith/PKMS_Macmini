@@ -3,27 +3,27 @@
 
 paths:
   # Google Drive Staging Area
-  staging_root: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging"
-  inbox: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX"
+  staging_root: "/Users/arian/GDrive/NotebookLM_Staging"
+  inbox: "/Users/arian/GDrive/NotebookLM_Staging/00_INBOX"
 
   # Source Channels (The Big 3 Only)
   sources:
-    channel_a_heptabase: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/heptabase"
-    channel_a_marginnote: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/marginnote"
-    channel_a_readwise: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/readwise"
-    channel_b_manual: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/manual"  # Work files
-    channel_c_youtube: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/youtube"
+    channel_a_heptabase: "/Users/arian/GDrive/NotebookLM_Staging/00_INBOX/heptabase"
+    channel_a_marginnote: "/Users/arian/GDrive/NotebookLM_Staging/00_INBOX/marginnote"
+    channel_a_readwise: "/Users/arian/GDrive/NotebookLM_Staging/00_INBOX/readwise"
+    channel_b_manual: "/Users/arian/GDrive/NotebookLM_Staging/00_INBOX/manual"  # Work files
+    channel_c_youtube: "/Users/arian/GDrive/NotebookLM_Staging/00_INBOX/youtube"
 
   # NotebookLM Target Categories (4 categories - Korean only)
   targets:
-    work_knowledge: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/01_업무지식"
-    work_advanced: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/02_업무심화"
-    extended_learning: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/03_확장교양"
-    entertainment: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/04_재미"
+    work_knowledge: "/Users/arian/GDrive/NotebookLM_Staging/01_업무지식"
+    work_advanced: "/Users/arian/GDrive/NotebookLM_Staging/02_업무심화"
+    extended_learning: "/Users/arian/GDrive/NotebookLM_Staging/03_확장교양"
+    entertainment: "/Users/arian/GDrive/NotebookLM_Staging/04_재미"
 
-  output: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/99_OUTPUT"
-  logs: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/_internal_system/pkms/logs"
-  internal_system: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/_internal_system"
+  output: "/Users/arian/GDrive/NotebookLM_Staging/99_OUTPUT"
+  logs: "/Users/arian/GDrive/NotebookLM_Staging/_internal_system/pkms/logs"
+  internal_system: "/Users/arian/GDrive/NotebookLM_Staging/_internal_system"
 
 # NotebookLM 4 Categories (Korean only)
 categories:

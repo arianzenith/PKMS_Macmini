@@ -10,6 +10,7 @@ import shutil
 import logging
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 # 로깅 설정
 logging.basicConfig(
@@ -18,9 +19,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 경로 설정 (CloudStorage 실제 경로)
-GDRIVE_ROOT = Path("/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브")
-INBOX_READWISE = GDRIVE_ROOT / "NotebookLM_Staging/00_INBOX/readwise"
+# .env 로드
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+# 경로 설정 (.env 기반)
+_ROOT_PATH = Path(os.getenv("ROOT_PATH", "/Users/arian/GDrive/NotebookLM_Staging"))
+GDRIVE_ROOT = _ROOT_PATH.parent
+INBOX_READWISE = _ROOT_PATH / "00_INBOX/readwise"
 
 # Readwise 파일 패턴
 READWISE_FILE_PATTERNS = [

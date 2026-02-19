@@ -27,7 +27,7 @@ STATUS_SCRIPT = SCRIPTS_DIR / "check_status.py"
 
 def run_script(script_path: Path, args: list = None) -> tuple:
     """스크립트 실행 헬퍼"""
-    cmd = ["python3", str(script_path)]
+    cmd = [sys.executable, str(script_path)]
     if args:
         cmd.extend(args)
 

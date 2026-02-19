@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import List, Tuple
 import json
 import subprocess
+from dotenv import load_dotenv
 
 # 로깅 설정
 logging.basicConfig(
@@ -20,10 +21,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 경로 설정
-GDRIVE_ROOT = Path("/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브")
-INBOX_READWISE = GDRIVE_ROOT / "NotebookLM_Staging/00_INBOX/readwise"
-STAGING_ROOT = GDRIVE_ROOT / "NotebookLM_Staging"
+# .env 로드
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+# 경로 설정 (.env 기반)
+STAGING_ROOT = Path(os.getenv("ROOT_PATH", "/Users/arian/GDrive/NotebookLM_Staging"))
+GDRIVE_ROOT = STAGING_ROOT.parent
+INBOX_READWISE = STAGING_ROOT / "00_INBOX/readwise"
 
 # Readwise 파일 탐색 패턴
 READWISE_PATTERNS = [
