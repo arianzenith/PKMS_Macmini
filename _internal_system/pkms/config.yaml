@@ -1,0 +1,81 @@
+# PKMS Configuration File
+# Project Rule: Only 3 allowed sources (The Big 3)
+
+paths:
+  # Google Drive Staging Area
+  staging_root: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging"
+  inbox: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX"
+
+  # Source Channels (The Big 3 Only)
+  sources:
+    channel_a_heptabase: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/heptabase"
+    channel_a_marginnote: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/marginnote"
+    channel_a_readwise: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/readwise"
+    channel_b_manual: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/manual"  # Work files
+    channel_c_youtube: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/00_INBOX/youtube"
+
+  # NotebookLM Target Categories (4 categories - Korean only)
+  targets:
+    work_knowledge: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/01_업무지식"
+    work_advanced: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/02_업무심화"
+    extended_learning: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/03_확장교양"
+    entertainment: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/04_재미"
+
+  output: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/99_OUTPUT"
+  logs: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/_internal_system/pkms/logs"
+  internal_system: "/Users/admin/Library/CloudStorage/GoogleDrive-geneses99@gmail.com/내 드라이브/NotebookLM_Staging/_internal_system"
+
+# NotebookLM 4 Categories (Korean only)
+categories:
+  work_knowledge: "01_업무지식 - 업무에 직접 활용 가능한 실무 지식"
+  work_advanced: "02_업무심화 - 업무 역량 향상을 위한 심화 학습"
+  extended_learning: "03_확장교양 - 간접적으로 업무에 도움이 되는 교양/인사이트"
+  entertainment: "04_재미 - 흥미 위주의 콘텐츠 (업무 무관)"
+
+# Source Channel Definitions
+source_channels:
+  channel_a:
+    name: "Research Pipeline"
+    description: "Marginnote4 → Readwise → Heptabase (MCP)"
+    subfolders: ["heptabase", "marginnote", "readwise"]
+    enabled: true
+
+  channel_b:
+    name: "Work Files"
+    description: "Google Drive inbox/manual - 업무 관련 직접 업로드 파일"
+    subfolders: ["manual"]
+    enabled: true
+
+  channel_c:
+    name: "Video Insight"
+    description: "YouTube MCP - 자막/요약본 추출"
+    subfolders: ["youtube"]
+    enabled: true
+
+# Classification Settings
+classification:
+  confidence_threshold: 0.75
+  auto_classify: true
+  validate_source: true  # 3개 채널 검증 필수
+  ignore_unknown_sources: true  # 허용되지 않은 소스는 무시
+
+# File Patterns
+file_patterns:
+  allowed_extensions:
+    - ".md"
+    - ".txt"
+    - ".pdf"
+    - ".docx"
+  ignore_patterns:
+    - ".*"
+    - "_*"
+    - "temp*"
+    - "daily*"  # 데일리 노트 무시
+    - "journal*"  # 일지 무시
+    - "memo*"  # 메모 무시
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/pkms.log"
