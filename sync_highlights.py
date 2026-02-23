@@ -40,6 +40,7 @@ Claude Code의 Readwise MCP(mcp__readwise__search_readwise_highlights)는
 
 import os
 import sys
+import json
 import time
 import argparse
 import requests
@@ -107,6 +108,10 @@ READWISE_BOOKS_URL      = "https://readwise.io/api/v2/books/"
 AI_MODEL       = "claude-sonnet-4-6"
 AI_MAX_TOKENS  = 2048
 BATCH_DELAY_S  = 1.5   # 배치 사이 대기 시간(초) — rate limit 방지
+
+# ─── Zettelkasten 융합 엔진 상수 ─────────────────────────────────────────────
+VAULT_FILE     = BASE_DIR / "_internal_system" / "pkms" / "pending_vault.json"
+FUSION_TRIGGER = 6     # 고유 출처 수 임계값 — 이 이상이면 융합 인사이트 생성
 
 # ─── 분류 키워드 (카테고리별 매칭 가중치) ────────────────────────────────────
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
@@ -390,6 +395,268 @@ def chunked(lst: list, size: int):
         yield lst[i : i + size]
 
 
+# ─── Vault (누적 버퍼) 관리 ──────────────────────────────────────────────────
+
+def load_vault() -> dict:
+    """pending_vault.json 로드. 없으면 빈 vault 반환."""
+    if not VAULT_FILE.exists():
+        return {"highlights": [], "created_at": datetime.now().isoformat()}
+    with open(VAULT_FILE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_vault(vault: dict, dry_run: bool = False) -> None:
+    """vault를 JSON으로 저장."""
+    if dry_run:
+        print(f"  [DRY-RUN] vault 저장 건너뜀: {VAULT_FILE}")
+        return
+    VAULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    vault["updated_at"] = datetime.now().isoformat()
+    with open(VAULT_FILE, "w", encoding="utf-8") as f:
+        json.dump(vault, f, ensure_ascii=False, indent=2)
+
+
+def clear_vault(dry_run: bool = False) -> None:
+    """vault 초기화 (융합 생성 후 다음 사이클 준비)."""
+    if dry_run:
+        print("  [DRY-RUN] vault 초기화 건너뜀")
+        return
+    empty = {
+        "highlights": [],
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+    VAULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(VAULT_FILE, "w", encoding="utf-8") as f:
+        json.dump(empty, f, ensure_ascii=False, indent=2)
+    print(f"  🗑️  vault 초기화 완료: {VAULT_FILE}")
+
+
+def add_to_vault(vault: dict, highlights: list[dict]) -> tuple[int, int]:
+    """vault에 하이라이트 추가 (ID 기준 중복 방지). Returns (추가 수, 스킵 수)."""
+    existing_ids = {str(h["id"]) for h in vault.get("highlights", [])}
+    added, skipped = 0, 0
+    for h in highlights:
+        h_id = str(h["id"])
+        if h_id in existing_ids:
+            skipped += 1
+        else:
+            vault["highlights"].append(h)
+            existing_ids.add(h_id)
+            added += 1
+    return added, skipped
+
+
+def count_vault_sources(vault: dict) -> int:
+    """vault 내 고유 출처(book_id) 수 반환."""
+    book_ids = {str(h.get("book_id", "")) for h in vault.get("highlights", [])}
+    book_ids.discard("")
+    return len(book_ids)
+
+
+def enrich_vault_titles(vault: dict, token: str, cache: dict) -> None:
+    """book_title/book_author 미설정 항목만 API로 보완 (재실행 안전)."""
+    for h in vault.get("highlights", []):
+        if "book_title" not in h and h.get("book_id"):
+            info           = fetch_book_info(token, h["book_id"], cache)
+            h["book_title"]  = info.get("title")  or f"Source_{h['book_id']}"
+            h["book_author"] = info.get("author") or ""
+
+
+# ─── Zettelkasten 융합 프롬프트 & 생성 ───────────────────────────────────────
+
+FUSION_PROMPT = """\
+당신은 지식 융합 전문가입니다. 아래는 {source_count}개의 서로 다른 출처에서 수집한 \
+{highlight_count}개의 하이라이트입니다.
+
+각 하이라이트는 다음 형식으로 제공됩니다:
+  [출처: 제목 / 저자] 본문 텍스트
+
+{highlights_block}
+
+위 하이라이트들을 Zettelkasten 방법론으로 교차 분석하여 다음 3가지를 작성하세요.
+답변은 한국어로 작성하고, 각 섹션 제목을 그대로 사용하세요.
+
+════════════════════════════════════════
+① 거대 가설 요약 (Cross-Source Synthesis)
+════════════════════════════════════════
+여러 출처에서 공통으로 등장하는 패턴이나 주제를 찾아,
+하나의 "거대 가설" 또는 통합 명제로 요약하세요.
+- 각 출처가 이 가설을 어떻게 뒷받침하는지 구체적으로 설명하세요
+- 출처 간 공통점, 차이점, 상호 보완 관계를 명시하세요
+- 10줄 이내로 작성하세요
+
+════════════════════════════════════════
+② 지식 간 비판적 대화 (Critical Dialogue Between Sources)
+════════════════════════════════════════
+출처들이 서로 '대화'한다면 어떤 논쟁이 벌어질까요?
+- 출처 A와 출처 B가 동의하는 점 vs 충돌하는 점을 표로 정리하세요
+- 가장 흥미로운 긴장 관계(tension) 2~3개를 선정하고 설명하세요
+- 이 긴장 관계를 해소하거나 통합할 수 있는 제3의 관점을 제시하세요
+
+════════════════════════════════════════
+③ 창발적 실무 아이디어 7개 (Emergent Practical Ideas)
+════════════════════════════════════════
+단일 출처에서는 나올 수 없었던, 여러 출처의 교차점에서만 탄생하는 아이디어 7개를 제안하세요.
+각 아이디어마다:
+  [아이디어 N] 제목
+  - 연결된 출처: (어느 출처들이 교차하는지)
+  - 핵심 인사이트: (이 교차점에서 나온 통찰 한 문장)
+  - 적용 시나리오: (구체적인 실행 방법 한 문장)
+  - 기대 효과: (한 문장)
+"""
+
+FUSION_SEP = "=" * 72
+
+
+def _build_highlights_block(vault: dict) -> tuple[str, int, int]:
+    """vault → AI 프롬프트용 텍스트 블록 변환. Returns (블록, 하이라이트수, 출처수)."""
+    highlights   = vault.get("highlights", [])
+    seen_sources: set[str] = set()
+    lines: list[str] = []
+    for h in highlights:
+        title  = h.get("book_title") or f"Source_{h.get('book_id', '?')}"
+        author = h.get("book_author", "")
+        text   = (h.get("text") or "").strip()
+        if not text:
+            continue
+        label = f"{title} / {author}" if author else title
+        seen_sources.add(title)
+        lines.append(f"[출처: {label}]\n{text}")
+    return "\n\n".join(lines), len(highlights), len(seen_sources)
+
+
+def _generate_fusion(client, vault: dict) -> str:
+    """Claude API로 Zettelkasten 융합 인사이트 생성."""
+    block, h_cnt, s_cnt = _build_highlights_block(vault)
+    if not block.strip():
+        print("  ⚠️  처리할 하이라이트 본문이 없습니다.")
+        return ""
+    prompt = FUSION_PROMPT.format(
+        source_count=s_cnt, highlight_count=h_cnt, highlights_block=block
+    )
+    try:
+        msg = client.messages.create(
+            model=AI_MODEL,
+            max_tokens=3000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
+    except Exception as e:
+        print(f"  ⚠️  AI 오류: {e}")
+        return ""
+
+
+def _save_fusion_output(vault: dict, fusion_text: str, dry_run: bool = False) -> "Path | None":
+    """Zettelkasten 융합 결과를 BASE_DIR 루트에 저장 (하위 폴더 없음)."""
+    date_str   = datetime.now().strftime("%Y%m%d_%H%M")
+    out_path   = BASE_DIR / f"Zettelkasten_Fusion_{date_str}.txt"
+    highlights = vault.get("highlights", [])
+    sources    = sorted({
+        h.get("book_title") or f"Source_{h.get('book_id', '?')}"
+        for h in highlights
+    })
+    source_lines = "\n".join(f"  • {s}" for s in sources)
+    content = "\n".join([
+        FUSION_SEP,
+        "  Zettelkasten 융합 인사이트",
+        f"  생성일: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"  출처 수: {len(sources)}개 | 하이라이트 수: {len(highlights)}개",
+        FUSION_SEP,
+        "",
+        "[ 융합된 출처 목록 ]",
+        source_lines,
+        "",
+        FUSION_SEP,
+        "",
+        fusion_text,
+        "",
+        FUSION_SEP,
+    ])
+    if dry_run:
+        print(f"\n  [DRY-RUN] 저장 예정: {out_path}")
+        for ln in content.splitlines()[:25]:
+            print(f"    {ln}")
+        print("    ...")
+        return None
+    out_path.write_text(content, encoding="utf-8")
+    return out_path
+
+
+# ─── 융합 엔진 진입점 ─────────────────────────────────────────────────────────
+
+def run_fusion_engine(
+    all_highlights: list[dict],
+    rw_token: str,
+    ai_client,
+    dry_run: bool = False,
+    force: bool = False,
+) -> None:
+    """
+    Zettelkasten 융합 엔진.
+    sync에서 이미 가져온 all_highlights를 vault에 추가하고,
+    FUSION_TRIGGER 이상의 고유 출처가 모이면 융합 인사이트를 생성한다.
+    """
+    print("\n" + "━" * 60)
+    print("  🧠 Zettelkasten 융합 엔진")
+    print("━" * 60)
+
+    vault    = load_vault()
+    in_vault = len(vault.get("highlights", []))
+    print(f"\n📦 vault 현황: {in_vault}개 하이라이트 | {count_vault_sources(vault)}개 출처")
+
+    # ── vault에 오늘 가져온 하이라이트 추가 (ID 중복 방지)
+    added, skipped = add_to_vault(vault, all_highlights)
+    print(f"   → 추가: {added}개 | 중복 스킵: {skipped}개")
+
+    # ── 제목 메타데이터 보완
+    if added > 0:
+        print("📚 출처 메타데이터 조회 중...")
+        book_cache: dict = {}
+        enrich_vault_titles(vault, rw_token, book_cache)
+
+    # ── 현재 상태
+    total      = len(vault.get("highlights", []))
+    n_sources  = count_vault_sources(vault)
+    needs_more = n_sources < FUSION_TRIGGER
+    print(f"\n📊 vault: {total}개 하이라이트 | {n_sources}/{FUSION_TRIGGER}개 출처")
+
+    # ── vault 저장 (융합 여부와 무관하게 항상 저장)
+    save_vault(vault, dry_run=dry_run)
+
+    if needs_more and not force:
+        remaining = FUSION_TRIGGER - n_sources
+        print(f"\n⏳ 지식 숙성 중... 출처 {remaining}개 더 필요 ({n_sources}/{FUSION_TRIGGER})")
+        print("━" * 60)
+        return
+
+    # ── AI 융합 인사이트 생성
+    if ai_client is None:
+        print("\n⚠️  AI 클라이언트 없음 — 융합 생성 불가")
+        return
+
+    print(f"\n🤖 AI 융합 인사이트 생성 중... (모델: {AI_MODEL})")
+    fusion_text = _generate_fusion(ai_client, vault)
+    if not fusion_text:
+        print("❌ AI 인사이트 생성 실패 — vault는 유지됩니다.")
+        return
+
+    # ── 출력 저장 (BASE_DIR 루트, 하위 폴더 없음)
+    out_path = _save_fusion_output(vault, fusion_text, dry_run=dry_run)
+    if out_path:
+        print(f"\n✅ 융합 인사이트 저장: {out_path}")
+
+    # ── vault 초기화
+    clear_vault(dry_run=dry_run)
+
+    print("\n" + "━" * 60)
+    print("  Zettelkasten 융합 완료")
+    print(f"  출처 수: {n_sources}개 | 하이라이트 수: {total}개")
+    if out_path:
+        print(f"  출력: {out_path}")
+    print("━" * 60)
+
+
 # ─── 메인 ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -416,7 +683,19 @@ def main() -> None:
         "--all", dest="force_all", action="store_true",
         help="processed_ids 무시하고 전체 재처리"
     )
+    parser.add_argument(
+        "--fusion", action="store_true",
+        help="Zettelkasten 융합 엔진 함께 실행 (vault 누적 → 6개 출처 도달 시 융합)"
+    )
+    parser.add_argument(
+        "--force-fusion", dest="force_fusion", action="store_true",
+        help="출처 수 미달해도 강제 융합 인사이트 생성 (--fusion 자동 포함)"
+    )
     args = parser.parse_args()
+
+    # --force-fusion은 --fusion도 활성화
+    if args.force_fusion:
+        args.fusion = True
 
     print("━" * 60)
     print("  Readwise → NotebookLM_Staging 동기화 엔진 v2")
@@ -491,6 +770,15 @@ def main() -> None:
     if not new_highlights:
         print("\n✅ 새로운 하이라이트가 없습니다.")
         print("━" * 60)
+        # --fusion이면 vault 누적 단계는 여전히 실행 (기존 vault 확인 목적)
+        if args.fusion:
+            run_fusion_engine(
+                all_highlights=all_highlights,
+                rw_token=rw_token,
+                ai_client=ai_client,
+                dry_run=args.dry_run,
+                force=args.force_fusion,
+            )
         return
 
     # ── 배치 처리
@@ -559,6 +847,16 @@ def main() -> None:
                 print(f"  {cat}: {cnt}개  →  {rolling_path}")
     print(f"\n  processed_ids.log: {PROCESSED_IDS_LOG}")
     print("━" * 60)
+
+    # ── Zettelkasten 융합 엔진 (--fusion 플래그 시 실행)
+    if args.fusion:
+        run_fusion_engine(
+            all_highlights=all_highlights,
+            rw_token=rw_token,
+            ai_client=ai_client,
+            dry_run=args.dry_run,
+            force=args.force_fusion,
+        )
 
 
 if __name__ == "__main__":
