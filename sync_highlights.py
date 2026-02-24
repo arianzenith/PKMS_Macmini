@@ -42,6 +42,8 @@ import os
 import sys
 import json
 import time
+import random
+import shutil
 import argparse
 import requests
 from datetime import datetime, timedelta, timezone
@@ -90,6 +92,17 @@ try:
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
+# pypdf는 선택적 의존성 — 없으면 PDF 파일 건너뜀
+try:
+    from pypdf import PdfReader as _PdfReader
+    PDF_AVAILABLE = True
+except ImportError:
+    try:
+        from PyPDF2 import PdfReader as _PdfReader  # type: ignore
+        PDF_AVAILABLE = True
+    except ImportError:
+        PDF_AVAILABLE = False
+
 # ─── 경로 설정 ────────────────────────────────────────────────────────────────
 BASE_DIR          = Path("/Users/arian/GDrive/NotebookLM_Staging")
 PROCESSED_IDS_LOG = BASE_DIR / "processed_ids.log"
@@ -112,10 +125,16 @@ BATCH_DELAY_S  = 1.5   # 배치 사이 대기 시간(초) — rate limit 방지
 # ─── Zettelkasten 융합 엔진 상수 ─────────────────────────────────────────────
 VAULT_FILE     = BASE_DIR / "_internal_system" / "pkms" / "pending_vault.json"
 FUSION_TRIGGER = 6     # 고유 출처 수 임계값 — 이 이상이면 융합 인사이트 생성
-HEPTABASE_DIR  = BASE_DIR / "00_Raw_Inputs"          # Heptabase 입력 폴더
+HEPTABASE_DIR  = BASE_DIR / "00_Raw_Inputs"          # 로컬 입력 폴더 (Heptabase 포함)
 ARCHIVE_DIR    = HEPTABASE_DIR / "Archive"            # 처리 완료 파일 보관
 FUSION_OUTPUT  = BASE_DIR / "Zettelkasten_Latest.txt" # 항상 덮어쓰기 (고정 파일명)
-MAX_HEPTABASE  = 10    # Heptabase 파일 최대 처리 수 (폭발 방지)
+MAX_HEPTABASE  = 10    # 로컬 파일 최대 스캔 수 (폭발 방지)
+
+# ─── 5:5 큐레이션 상수 ───────────────────────────────────────────────────────
+CURATION_POOL_SIZE    = 30   # 후보군 크기
+CURATION_FIXED        = 3    # 최신성 기준 고정 선별 수
+CURATION_RANDOM       = 3    # 무작위(의외성) 선별 수
+FUSION_SOURCES_TARGET = CURATION_FIXED + CURATION_RANDOM  # = 6
 
 # ─── 분류 키워드 (카테고리별 매칭 가중치) ────────────────────────────────────
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
@@ -467,29 +486,50 @@ def enrich_vault_titles(vault: dict, token: str, cache: dict) -> None:
             h["book_author"] = info.get("author") or ""
 
 
-# ─── Heptabase 파일 스캔 및 Archive ──────────────────────────────────────────
+# ─── 로컬 파일 스캔 및 Archive ───────────────────────────────────────────────
+
+def extract_pdf_text(path: "Path") -> str:
+    """PDF에서 텍스트 추출 (최대 20페이지). pypdf/PyPDF2 없으면 빈 문자열 반환."""
+    if not PDF_AVAILABLE:
+        return ""
+    try:
+        reader = _PdfReader(str(path))
+        pages: list[str] = []
+        for page in reader.pages[:20]:
+            text = page.extract_text()
+            if text:
+                pages.append(text.strip())
+        return "\n\n".join(pages)
+    except Exception as e:
+        print(f"  ⚠️  PDF 텍스트 추출 실패 ({path.name}): {e}")
+        return ""
+
 
 def scan_heptabase_files(max_files: int = MAX_HEPTABASE) -> list[dict]:
     """
-    00_Raw_Inputs/ 폴더를 재귀적으로 스캔하여 모든 .md/.txt 파일 수집.
-    - 날짜 필터 없음: 현재 폴더에 있는 파일 = 분석 대상 (Archive 이동으로 중복 방지)
+    00_Raw_Inputs/ 폴더를 재귀적으로 스캔하여 로컬 파일 수집.
+    지원 포맷: .md, .txt, .pdf (텍스트 추출 시도)
     - Archive/ 하위폴더 제외
+    - 날짜 필터 없음: Archive 이동으로 중복 방지
     - 파일 수 초과 시 최신 수정순으로 max_files개만 처리
     """
     HEPTABASE_DIR.mkdir(parents=True, exist_ok=True)
     valid: list[dict] = []
+    supported = {".md", ".txt", ".pdf"}
 
     for f in HEPTABASE_DIR.rglob("*"):
         if not f.is_file():
             continue
-        # Archive/ 폴더 내 파일 제외
         if ARCHIVE_DIR in f.parents:
             continue
-        if f.suffix.lower() not in (".md", ".txt"):
+        if f.suffix.lower() not in supported:
             continue
         mtime = datetime.fromtimestamp(f.stat().st_mtime)
         try:
-            content = f.read_text(encoding="utf-8", errors="ignore").strip()
+            if f.suffix.lower() == ".pdf":
+                content = extract_pdf_text(f)
+            else:
+                content = f.read_text(encoding="utf-8", errors="ignore").strip()
         except Exception:
             continue
         if not content:
@@ -498,7 +538,7 @@ def scan_heptabase_files(max_files: int = MAX_HEPTABASE) -> list[dict]:
 
     valid.sort(key=lambda x: x["mtime"], reverse=True)
     if len(valid) > max_files:
-        print(f"  ⚠️  Heptabase 파일 {len(valid)}개 감지 → 최신 {max_files}개만 처리")
+        print(f"  ⚠️  로컬 파일 {len(valid)}개 감지 → 최신 {max_files}개만 처리")
         valid = valid[:max_files]
     return valid
 
@@ -521,14 +561,99 @@ def archive_heptabase_files(files: list[dict], dry_run: bool = False) -> None:
         print(f"  📁 Archive 이동: {src.name}")
 
 
+def cleanup_empty_subdirs(base_dir: "Path", exclude_dir: "Path") -> int:
+    """
+    base_dir 내 빈 하위 디렉토리를 제거 (exclude_dir 및 그 하위 제외).
+    깊은 경로부터 처리하여 연쇄 삭제 지원. 삭제된 디렉토리 수 반환.
+    """
+    removed = 0
+    # 깊은 경로 우선 정렬
+    subdirs = sorted(
+        (d for d in base_dir.rglob("*") if d.is_dir()),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    )
+    for d in subdirs:
+        if d == base_dir or d == exclude_dir:
+            continue
+        if exclude_dir in d.parents:
+            continue
+        try:
+            if not any(d.iterdir()):
+                d.rmdir()
+                removed += 1
+        except Exception:
+            pass
+    return removed
+
+
+def curate_sources(
+    local_files: list[dict],
+    vault: dict,
+) -> tuple[list[dict], list[dict]]:
+    """
+    5:5 전략적 큐레이션.
+    전체 소스(로컬 파일 + Readwise vault)에서 후보군 CURATION_POOL_SIZE개를 선정,
+    최신 CURATION_FIXED개 고정 + 무작위 CURATION_RANDOM개 선별.
+    Returns: (selected_local_files, selected_readwise_highlights)
+    """
+    pool: list[dict] = []
+
+    for f in local_files:
+        pool.append({
+            "stype": "local",
+            "title": f["name"],
+            "mtime": f["mtime"],
+            "item":  f,
+        })
+
+    for h in vault.get("highlights", []):
+        ts_str = h.get("updated") or h.get("highlighted_at") or ""
+        try:
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            ts = datetime.min
+        pool.append({
+            "stype": "readwise",
+            "title": h.get("book_title") or "?",
+            "mtime": ts,
+            "item":  h,
+        })
+
+    # 최신순 정렬 → 후보군 30개
+    pool.sort(key=lambda x: x["mtime"], reverse=True)
+    candidates = pool[:CURATION_POOL_SIZE]
+
+    fixed_slots  = candidates[:CURATION_FIXED]
+    remain_slots = candidates[CURATION_FIXED:]
+    random_slots = random.sample(remain_slots, min(CURATION_RANDOM, len(remain_slots)))
+
+    selected = fixed_slots + random_slots
+
+    print(f"\n🎯 5:5 큐레이션: 전체 {len(pool)}개 → 후보 {len(candidates)}개")
+    print(f"   ├ [최신 {len(fixed_slots)}개 고정]")
+    for s in fixed_slots:
+        tag = "🏷️ 로컬" if s["stype"] == "local" else "📚 RW"
+        print(f"   │  {tag} {s['title'][:50]} ({s['mtime'].strftime('%m-%d %H:%M')})")
+    print(f"   └ [무작위 {len(random_slots)}개 선별]")
+    for s in random_slots:
+        tag = "🏷️ 로컬" if s["stype"] == "local" else "📚 RW"
+        pool_rank = next((i + 1 for i, p in enumerate(pool) if p["item"] is s["item"]), "?")
+        print(f"      {tag} {s['title'][:50]} (풀 #{pool_rank})")
+
+    sel_local = [s["item"] for s in selected if s["stype"] == "local"]
+    sel_rw    = [s["item"] for s in selected if s["stype"] == "readwise"]
+    return sel_local, sel_rw
+
+
 # ─── Zettelkasten 융합 프롬프트 & 생성 ───────────────────────────────────────
 
 FUSION_PROMPT = """\
-당신은 지식 충돌 전문가(Knowledge Collision Specialist)입니다.
-아래 소스들을 분석하여 3개의 섹션을 작성하세요. 답변은 한국어로 작성하세요.
+당신은 냉철한 전략 컨설턴트이자 비판적 철학자입니다.
+아래 두 유형의 소스를 분석해 3개의 섹션을 한국어로 작성하세요.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-🧠 [사용자의 생각] — Heptabase 메모 ({heptabase_count}개)
+🧠 [사용자의 생각] — 로컬 노트/메모 ({heptabase_count}개)
 ━━━━━━━━━━━━━━━━━━━━━━━━
 {heptabase_block}
 
@@ -537,68 +662,72 @@ FUSION_PROMPT = """\
 ━━━━━━━━━━━━━━━━━━━━━━━━
 {readwise_block}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[작성 원칙 — 이 4가지를 위반하면 리포트 전체가 실패다]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. 중립성 금지: "양쪽 모두 일리가 있다"는 문장은 절대 쓰지 마라.
-   반드시 하나의 관점에 힘을 실어주거나, 두 주장의 모순을 극한으로 몰아붙여
-   어느 쪽도 아닌 날카로운 제3의 대안을 제시하라.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[철칙 — 이 5가지를 위반한 리포트는 처음부터 다시 작성한다]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. 중립성 절대 금지: "양쪽 모두 일리가 있다", "상황에 따라 다르다"는 문장은
+   금지어다. 반드시 하나의 우월한 논리를 선택하거나, 두 주장의 모순을 극한으로
+   몰아붙여 어느 쪽도 아닌 날카로운 제3의 대안을 선언하라.
 
-2. 비판의 구체성: "일부 한계가 있다"는 식의 모호한 표현 금지.
-   "이 관점은 [구체적 상황]에서는 완전히 틀렸다"처럼 명명백백하게 지적하라.
-   사용자가 기분이 나쁘더라도 반박할 수 없는 팩트여야 한다.
+2. 비판의 칼날: "일부 한계가 있다", "재고해볼 필요가 있다"는 표현은 쓰레기통에
+   버려라. "이 주장은 [구체 상황]에서 시대착오적 허구이며 실행 불가능하다"처럼
+   사용자가 기분이 나쁘더라도 반박할 수 없는 팩트를 들이밀어라.
 
-3. 실용성의 극대화: 액션 플랜은 "노력하라", "고려하라" 금지.
-   "내일 오전 9시에 [구체적 무엇]을 [몇 분 동안] 실행하라" 수준으로 써라.
+3. 즉각 실행 수준: 액션 플랜에 "노력하라", "고려하라", "시도해보라"는 금지.
+   "내일 오전 9시에 [무엇]을 [몇 분] 동안 하라"는 수준으로 구체화하라.
 
-4. 큐레이션 우선순위: 서로 동의하는 소스끼리 묶지 마라.
-   가장 모순이 심한 소스 쌍을 1순위로 골라 충돌시켜라. 지루함은 이 리포트의 적이다.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. 모순 우선 충돌: 동의하는 소스끼리 묶는 것은 지적 비겁이다.
+   가장 모순되고 이질적인 소스 쌍을 1순위로 골라 충돌시켜라.
+
+5. 난이도·파급력 명시: 아이디어 7개 각각에 [난이도: 상/중/하]와 [파급력: 상/중/하]를
+   반드시 명시하라. 파급력이 낮은 아이디어는 처음부터 제외하라.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ════════════════════════════════════════
 ① 거대 가설 요약 (Cross-Source Synthesis)
 ════════════════════════════════════════
 모든 소스를 관통하는 하나의 "거대 가설"을 10줄 이내로 도출하세요.
 - 가장 모순되는 소스 쌍을 골라 그 충돌을 가설의 핵심으로 삼으세요
-- "상황에 따라 다르다"는 결론은 허용되지 않습니다. 하나의 명확한 주장으로 끝내세요
-- 사용자가 지금 당장 믿어야 할 하나의 문장으로 결론을 내세요
+- "상황에 따라 다르다"는 결론 금지. 하나의 단호한 주장으로 끝내세요
+- 마지막 문장은 "지금 당장 믿어야 할 한 줄: ..."로 반드시 끝내세요
 
 ════════════════════════════════════════
 ② 사용자 vs 외부 지식: 비판적 대화
 ════════════════════════════════════════
-사용자의 생각(Heptabase)을 법정의 피고인으로 세우고, 외부 지식(Readwise)이
-검사와 변호인 역할을 모두 맡습니다.
+사용자의 생각을 법정의 피고인으로 세우고, 외부 지식이 검사·변호인 역할을 맡습니다.
 
-### 🔴 검사 측 논고 (외부 지식이 사용자 생각을 공격하는 부분)
-- 사용자 생각의 어떤 전제가 틀렸는지, "이 전제는 [구체적 이유]로 완전히 무너진다"는
-  식으로 명시하세요
+### 🔴 검사 측 논고
+사용자 생각의 핵심 전제가 왜 틀렸는지를,
+"이 전제는 [구체 이유]로 시대착오적 허구다"라는 문장 수준으로 공격하세요.
 
-### 🟢 변호인 측 변론 (외부 지식이 사용자 생각을 지지하는 부분)
-- "이 부분은 [출처]가 증명한다"는 식으로 근거와 함께 서술하세요
+### 🟢 변호인 측 변론
+"이 부분은 [출처]가 증명한다"는 형식으로 지지하세요.
 
-### ⚡ 판결 (중립이 아닌 제3의 대안)
-- 공격과 변론 어느 쪽도 아닌, 두 충돌에서 탄생하는 새로운 명제를 한 문장으로 선언하세요
-- "두 관점 모두 일리가 있다"는 판결은 기각입니다
+### ⚡ 판결 (중립 아닌 제3의 대안)
+검사도 변호인도 아닌, 두 충돌에서 탄생하는 새로운 명제를 한 문장으로 선언하세요.
+"두 관점 모두 일리가 있다"는 판결은 기각입니다.
 
 ════════════════════════════════════════
 ③ 창발적 실무 아이디어 7개 (Emergent Practical Ideas)
 ════════════════════════════════════════
-서로 동의하는 소스끼리는 묶지 마세요. 가장 이질적인 소스의 충돌에서만 아이디어를 뽑으세요.
+동의하는 소스끼리 묶지 마세요. 가장 이질적인 소스 충돌에서만 아이디어를 뽑으세요.
+파급력이 낮은 아이디어는 처음부터 제외하세요.
 
-각 아이디어마다:
+각 아이디어마다 아래 형식을 정확히 따르세요:
+
   [아이디어 N] 제목 (동사로 시작하는 명령형)
-  - 충돌 소스: (어떤 소스 × 어떤 소스 — 이 둘은 서로 모순돼야 한다)
-  - 핵심 팩트: (이 충돌에서 도출되는 불편한 진실 한 문장)
-  - 즉각 실행: "내일 [오전/오후] [몇 시]에 [구체적 행동]을 [몇 분] 동안 하라"
-  - 하지 않으면: (실행하지 않을 경우 발생하는 구체적 손실 한 문장)
+  - 난이도: 상/중/하 | 파급력: 상/중/하
+  - 충돌 소스: (소스A × 소스B — 이 둘은 반드시 모순돼야 한다)
+  - 불편한 진실: (이 충돌에서 도출되는 반박 불가 팩트 한 문장)
+  - 즉각 실행: "내일 [오전/오후] [시각]에 [구체적 행동]을 [N분] 동안 하라"
+  - 하지 않으면: (실행 안 할 경우의 구체적 손실 한 문장)
 """
 
 FUSION_SEP = "=" * 72
 
 
-def _build_readwise_block(vault: dict) -> tuple[str, int, int]:
-    """Readwise vault → 프롬프트 블록. Returns (블록, 하이라이트수, 출처수)."""
-    highlights   = vault.get("highlights", [])
+def _build_readwise_block(highlights: list[dict]) -> tuple[str, int, int]:
+    """Readwise 하이라이트 리스트 → 프롬프트 블록. Returns (블록, 하이라이트수, 출처수)."""
     seen_sources: set[str] = set()
     lines: list[str] = []
     for h in highlights:
@@ -621,18 +750,22 @@ def _build_heptabase_block(heptabase_files: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def _generate_fusion(client, vault: dict, heptabase_files: list[dict]) -> str:
-    """Claude API로 Zettelkasten 융합 인사이트 생성."""
-    readwise_block, rw_cnt, s_cnt = _build_readwise_block(vault)
-    heptabase_block = _build_heptabase_block(heptabase_files)
+def _generate_fusion(
+    client,
+    local_files: list[dict],
+    readwise_items: list[dict],
+) -> str:
+    """Claude API로 Zettelkasten 융합 인사이트 생성 (큐레이션된 소스 사용)."""
+    readwise_block, rw_cnt, s_cnt = _build_readwise_block(readwise_items)
+    heptabase_block = _build_heptabase_block(local_files)
 
     if not readwise_block.strip() and not heptabase_block.strip():
         print("  ⚠️  처리할 내용이 없습니다.")
         return ""
 
     prompt = FUSION_PROMPT.format(
-        heptabase_count=len(heptabase_files),
-        heptabase_block=heptabase_block or "(Heptabase 메모 없음)",
+        heptabase_count=len(local_files),
+        heptabase_block=heptabase_block or "(로컬 노트 없음)",
         readwise_count=rw_cnt,
         source_count=s_cnt,
         readwise_block=readwise_block or "(Readwise 하이라이트 없음)",
@@ -640,7 +773,7 @@ def _generate_fusion(client, vault: dict, heptabase_files: list[dict]) -> str:
     try:
         msg = client.messages.create(
             model=AI_MODEL,
-            max_tokens=6000,
+            max_tokens=8000,
             messages=[{"role": "user", "content": prompt}],
         )
         return msg.content[0].text.strip()
@@ -650,25 +783,28 @@ def _generate_fusion(client, vault: dict, heptabase_files: list[dict]) -> str:
 
 
 def _save_fusion_output(
-    vault: dict,
-    heptabase_files: list[dict],
+    local_files: list[dict],
+    readwise_items: list[dict],
     fusion_text: str,
     dry_run: bool = False,
 ) -> "Path | None":
-    """Zettelkasten 융합 결과를 Zettelkasten_Latest.txt에 덮어쓰기."""
-    highlights = vault.get("highlights", [])
+    """
+    Zettelkasten 융합 결과를 Zettelkasten_Latest.txt에 덮어쓰기.
+    동시에 Archive/[날짜_시간_Fusion.txt]에 백업 보관.
+    """
     rw_sources = sorted({
         h.get("book_title") or f"Source_{h.get('book_id', '?')}"
-        for h in highlights
+        for h in readwise_items
     })
     rw_lines   = "\n".join(f"  • [Readwise]   {s}" for s in rw_sources)
-    hept_lines = "\n".join(f"  • [Heptabase]  {f['name']}" for f in heptabase_files)
+    hept_lines = "\n".join(f"  • [로컬]       {f['name']}" for f in local_files)
 
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     content = "\n".join([
         FUSION_SEP,
         "  Zettelkasten 융합 인사이트 (Latest)",
-        f"  생성일: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        f"  Readwise 출처: {len(rw_sources)}개 | Heptabase 메모: {len(heptabase_files)}개",
+        f"  생성일: {now_str}",
+        f"  큐레이션: 로컬 {len(local_files)}개 + Readwise {len(rw_sources)}개 출처",
         FUSION_SEP,
         "",
         "[ 융합된 소스 목록 ]",
@@ -689,7 +825,16 @@ def _save_fusion_output(
         print("    ...")
         return None
 
+    # ── 메인 출력 (NotebookLM 새로고침용, 고정 파일명)
     FUSION_OUTPUT.write_text(content, encoding="utf-8")
+
+    # ── Archive 백업 (날짜_시간_Fusion.txt)
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    ts_backup   = datetime.now().strftime("%Y%m%d_%H%M")
+    backup_path = ARCHIVE_DIR / f"{ts_backup}_Fusion.txt"
+    backup_path.write_text(content, encoding="utf-8")
+    print(f"  📦 Archive 백업: {backup_path.name}")
+
     return FUSION_OUTPUT
 
 
@@ -703,27 +848,27 @@ def run_fusion_engine(
     force: bool = False,
 ) -> None:
     """
-    Smart Multi-Source Zettelkasten 융합 엔진.
-    - Readwise 하이라이트 → vault 누적
-    - Heptabase 메모 (00_Raw_Inputs/) → 즉시 분석
-    - (Readwise 출처 수 + Heptabase 파일 수) >= FUSION_TRIGGER 시 융합 생성
-    - 출력: Zettelkasten_Latest.txt (덮어쓰기)
-    - 완료 후: Heptabase .md 파일 → Archive/ 이동, vault 초기화
+    Fusion Insight Engine v2.2
+    ① Omni-Source: 로컬 파일(md/txt/pdf) + Readwise vault
+    ② 5:5 큐레이션: 후보 30개 → 최신 3개 고정 + 무작위 3개 = 6개 선별
+    ③ Anti-Neutrality 프롬프트 → Zettelkasten_Latest.txt 덮어쓰기
+    ④ Archive 백업 + 사용된 로컬 파일 이동 + 빈 서브폴더 정리
     """
     print("\n" + "━" * 60)
-    print("  🧠 Smart Zettelkasten 융합 엔진")
+    print("  🧠 Fusion Insight Engine v2.2")
     print("━" * 60)
 
-    # ── Heptabase 파일 스캔 (전체, Archive 제외)
-    print("\n📂 Heptabase 파일 스캔 중... (00_Raw_Inputs/ 전체)")
-    heptabase_files = scan_heptabase_files()
-    if heptabase_files:
-        for f_info in heptabase_files:
-            print(f"   • {f_info['name']} ({f_info['mtime'].strftime('%m-%d %H:%M')})")
+    # ── ① 로컬 파일 스캔 (00_Raw_Inputs/ 전체, Archive 제외)
+    print("\n📂 로컬 파일 스캔 중... (00_Raw_Inputs/ — md/txt/pdf)")
+    local_files = scan_heptabase_files()
+    if local_files:
+        for f_info in local_files:
+            fmt = f_info['path'].suffix.upper()[1:]
+            print(f"   • [{fmt}] {f_info['name']} ({f_info['mtime'].strftime('%m-%d %H:%M')})")
     else:
         print("   → 처리할 파일 없음 (Archive 제외)")
 
-    # ── Readwise vault 로드 및 업데이트
+    # ── ② Readwise vault 로드 및 업데이트
     vault    = load_vault()
     in_vault = len(vault.get("highlights", []))
     print(f"\n📦 Readwise vault: {in_vault}개 하이라이트 | {count_vault_sources(vault)}개 출처")
@@ -736,21 +881,16 @@ def run_fusion_engine(
         book_cache: dict = {}
         enrich_vault_titles(vault, rw_token, book_cache)
 
-    # ── 통합 트리거 계산
-    total      = len(vault.get("highlights", []))
-    n_rw_src   = count_vault_sources(vault)
-    n_hept     = len(heptabase_files)
-    combined   = n_rw_src + n_hept
-    needs_more = combined < FUSION_TRIGGER
-
-    print(f"\n📊 통합 출처: Readwise {n_rw_src}개 + Heptabase {n_hept}개 = {combined}/{FUSION_TRIGGER}")
-
     # ── vault 저장 (항상)
     save_vault(vault, dry_run=dry_run)
 
-    if needs_more and not force:
-        remaining = FUSION_TRIGGER - combined
-        print(f"\n⏳ 지식 숙성 중... 출처 {remaining}개 더 필요 ({combined}/{FUSION_TRIGGER})")
+    # ── 소스 풀 확인
+    total_pool = len(local_files) + len(vault.get("highlights", []))
+    print(f"\n📊 전체 풀: 로컬 {len(local_files)}개 + Readwise {len(vault.get('highlights',[]))}개 = {total_pool}개")
+
+    if total_pool < FUSION_SOURCES_TARGET and not force:
+        remaining = FUSION_SOURCES_TARGET - total_pool
+        print(f"\n⏳ 지식 숙성 중... 소스 {remaining}개 더 필요 ({total_pool}/{FUSION_SOURCES_TARGET})")
         print("━" * 60)
         return
 
@@ -759,28 +899,38 @@ def run_fusion_engine(
         print("\n⚠️  AI 클라이언트 없음 — 융합 생성 불가")
         return
 
-    # ── 융합 인사이트 생성
-    print(f"\n🔗 Heptabase 메모 {n_hept}개와 Readwise 하이라이트 {total}개를 결합 중...")
-    print(f"🤖 AI 융합 인사이트 생성 중... (모델: {AI_MODEL})")
-    fusion_text = _generate_fusion(ai_client, vault, heptabase_files)
+    # ── ③ 5:5 전략적 큐레이션
+    sel_local, sel_rw = curate_sources(local_files, vault)
+    n_local = len(sel_local)
+    n_rw    = len(sel_rw)
+
+    print(f"\n🔗 로컬 {n_local}개 + Readwise {n_rw}개 → 융합 생성 중...")
+    print(f"🤖 AI 분석 중... (모델: {AI_MODEL})")
+    fusion_text = _generate_fusion(ai_client, sel_local, sel_rw)
     if not fusion_text:
         print("❌ AI 인사이트 생성 실패 — vault 및 파일 유지됩니다.")
         return
 
-    # ── Zettelkasten_Latest.txt 덮어쓰기
-    out_path = _save_fusion_output(vault, heptabase_files, fusion_text, dry_run=dry_run)
+    # ── Zettelkasten_Latest.txt 덮어쓰기 + Archive 백업
+    out_path = _save_fusion_output(sel_local, sel_rw, fusion_text, dry_run=dry_run)
     if out_path:
         print(f"\n✅ 융합 인사이트 저장: {out_path}")
 
-    # ── Heptabase 파일 → Archive/ 이동
-    archive_heptabase_files(heptabase_files, dry_run=dry_run)
+    # ── ④ 사용된 로컬 파일 → Archive/ 이동
+    archive_heptabase_files(sel_local, dry_run=dry_run)
+
+    # ── 빈 서브폴더 정리 (rm -rf 대신 안전한 rmdir 체인)
+    if not dry_run:
+        removed = cleanup_empty_subdirs(HEPTABASE_DIR, ARCHIVE_DIR)
+        if removed:
+            print(f"  🧹 빈 서브폴더 {removed}개 정리 완료")
 
     # ── vault 초기화 (다음 사이클 준비)
     clear_vault(dry_run=dry_run)
 
     print("\n" + "━" * 60)
-    print("  Zettelkasten 융합 완료")
-    print(f"  Readwise {n_rw_src}개 출처 + Heptabase {n_hept}개 메모 융합")
+    print("  Fusion Insight Engine v2.2 완료")
+    print(f"  큐레이션: 로컬 {n_local}개 + Readwise {n_rw}개 융합")
     if out_path:
         print(f"  출력: {out_path}")
     print("━" * 60)
