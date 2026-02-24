@@ -471,21 +471,23 @@ def enrich_vault_titles(vault: dict, token: str, cache: dict) -> None:
 
 def scan_heptabase_files(max_files: int = MAX_HEPTABASE) -> list[dict]:
     """
-    00_Raw_Inputs/ 폴더에서 최근 24시간 내 생성/수정된 .md/.txt 파일 스캔.
-    Archive/ 하위폴더 제외. 파일 수 초과 시 최신 max_files개만 처리.
+    00_Raw_Inputs/ 폴더를 재귀적으로 스캔하여 모든 .md/.txt 파일 수집.
+    - 날짜 필터 없음: 현재 폴더에 있는 파일 = 분석 대상 (Archive 이동으로 중복 방지)
+    - Archive/ 하위폴더 제외
+    - 파일 수 초과 시 최신 수정순으로 max_files개만 처리
     """
     HEPTABASE_DIR.mkdir(parents=True, exist_ok=True)
-    cutoff = datetime.now() - timedelta(hours=24)
     valid: list[dict] = []
 
-    for f in HEPTABASE_DIR.iterdir():
+    for f in HEPTABASE_DIR.rglob("*"):
         if not f.is_file():
+            continue
+        # Archive/ 폴더 내 파일 제외
+        if ARCHIVE_DIR in f.parents:
             continue
         if f.suffix.lower() not in (".md", ".txt"):
             continue
         mtime = datetime.fromtimestamp(f.stat().st_mtime)
-        if mtime < cutoff:
-            continue
         try:
             content = f.read_text(encoding="utf-8", errors="ignore").strip()
         except Exception:
@@ -688,14 +690,14 @@ def run_fusion_engine(
     print("  🧠 Smart Zettelkasten 융합 엔진")
     print("━" * 60)
 
-    # ── Heptabase 파일 스캔 (최근 24시간)
-    print("\n📂 Heptabase 파일 스캔 중... (00_Raw_Inputs/)")
+    # ── Heptabase 파일 스캔 (전체, Archive 제외)
+    print("\n📂 Heptabase 파일 스캔 중... (00_Raw_Inputs/ 전체)")
     heptabase_files = scan_heptabase_files()
     if heptabase_files:
         for f_info in heptabase_files:
             print(f"   • {f_info['name']} ({f_info['mtime'].strftime('%m-%d %H:%M')})")
     else:
-        print("   → 최근 24시간 내 파일 없음")
+        print("   → 처리할 파일 없음 (Archive 제외)")
 
     # ── Readwise vault 로드 및 업데이트
     vault    = load_vault()
@@ -734,7 +736,8 @@ def run_fusion_engine(
         return
 
     # ── 융합 인사이트 생성
-    print(f"\n🤖 AI 융합 인사이트 생성 중... (모델: {AI_MODEL})")
+    print(f"\n🔗 Heptabase 메모 {n_hept}개와 Readwise 하이라이트 {total}개를 결합 중...")
+    print(f"🤖 AI 융합 인사이트 생성 중... (모델: {AI_MODEL})")
     fusion_text = _generate_fusion(ai_client, vault, heptabase_files)
     if not fusion_text:
         print("❌ AI 인사이트 생성 실패 — vault 및 파일 유지됩니다.")
