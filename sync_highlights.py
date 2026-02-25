@@ -818,15 +818,24 @@ def _save_fusion_output(
         FUSION_SEP,
     ])
 
+    # ── 날짜 기반 파일명 생성 (YYMMDD_Zettelkasten.txt, 중복 시 순번)
+    date_str  = datetime.now().strftime("%y%m%d")
+    base_name = f"{date_str}_Zettelkasten.txt"
+    out_path  = BASE_DIR / base_name
+    seq = 2
+    while out_path.exists():
+        out_path = BASE_DIR / f"{date_str}_Zettelkasten_{seq}.txt"
+        seq += 1
+
     if dry_run:
-        print(f"\n  [DRY-RUN] 저장 예정: {FUSION_OUTPUT}")
+        print(f"\n  [DRY-RUN] 저장 예정: {out_path}")
         for ln in content.splitlines()[:25]:
             print(f"    {ln}")
         print("    ...")
         return None
 
-    # ── 메인 출력 (NotebookLM 새로고침용, 고정 파일명)
-    FUSION_OUTPUT.write_text(content, encoding="utf-8")
+    # ── 날짜별 파일 저장 (NotebookLM 개별 소스 관리용)
+    out_path.write_text(content, encoding="utf-8")
 
     # ── Archive 백업 (날짜_시간_Fusion.txt)
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -835,7 +844,7 @@ def _save_fusion_output(
     backup_path.write_text(content, encoding="utf-8")
     print(f"  📦 Archive 백업: {backup_path.name}")
 
-    return FUSION_OUTPUT
+    return out_path
 
 
 # ─── 융합 엔진 진입점 ─────────────────────────────────────────────────────────
@@ -932,7 +941,7 @@ def run_fusion_engine(
     print("  Fusion Insight Engine v2.2 완료")
     print(f"  큐레이션: 로컬 {n_local}개 + Readwise {n_rw}개 융합")
     if out_path:
-        print(f"  출력: {out_path}")
+        print(f"  출력: {out_path.name}")
     print("━" * 60)
 
 
