@@ -135,6 +135,7 @@ CURATION_POOL_SIZE    = 30   # 후보군 크기
 CURATION_FIXED        = 3    # 최신성 기준 고정 선별 수
 CURATION_RANDOM       = 3    # 무작위(의외성) 선별 수
 FUSION_SOURCES_TARGET = CURATION_FIXED + CURATION_RANDOM  # = 6
+DEDUP_THRESHOLD       = 0.80 # Readwise-로컬 간 단어 겹침 80% 이상 = 중복
 
 # ─── 분류 키워드 (카테고리별 매칭 가중치) ────────────────────────────────────
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
@@ -587,6 +588,50 @@ def cleanup_empty_subdirs(base_dir: "Path", exclude_dir: "Path") -> int:
     return removed
 
 
+def text_overlap(a: str, b: str) -> float:
+    """
+    두 텍스트의 단어 단위 겹침 비율 (Overlap Coefficient).
+    짧은 쪽 단어 집합 기준으로 계산 → 한 텍스트가 다른 텍스트에 포함된 경우도 검출.
+    """
+    words_a = set(a.lower().split())
+    words_b = set(b.lower().split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = len(words_a & words_b)
+    smaller = min(len(words_a), len(words_b))
+    return intersection / smaller
+
+
+def deduplicate_pool(pool: list[dict]) -> tuple[list[dict], int]:
+    """
+    pool 내 Readwise-로컬 간 텍스트 중복 감지 및 제거.
+    - 겹침 >= DEDUP_THRESHOLD(80%) → 중복 판정
+    - 중복 시 Readwise 항목 제거, 로컬(Heptabase) 항목 유지
+    - 사용자의 주관적 메모가 담긴 로컬 데이터를 우선시
+    Returns: (deduped_pool, removed_count)
+    """
+    # 로컬 파일 텍스트 사전 수집
+    local_texts: list[str] = [
+        p["item"].get("content", "").strip()
+        for p in pool if p["stype"] == "local"
+    ]
+
+    to_remove: set[int] = set()
+    for i, p in enumerate(pool):
+        if p["stype"] != "readwise":
+            continue
+        rw_text = (p["item"].get("text") or "").strip()
+        if not rw_text:
+            continue
+        for loc_text in local_texts:
+            if loc_text and text_overlap(rw_text, loc_text) >= DEDUP_THRESHOLD:
+                to_remove.add(i)
+                break
+
+    deduped = [p for i, p in enumerate(pool) if i not in to_remove]
+    return deduped, len(to_remove)
+
+
 def curate_sources(
     local_files: list[dict],
     vault: dict,
@@ -620,8 +665,15 @@ def curate_sources(
             "item":  h,
         })
 
-    # 최신순 정렬 → 후보군 30개
+    # 최신순 정렬
     pool.sort(key=lambda x: x["mtime"], reverse=True)
+
+    # ── 중복 제거 (Readwise-로컬 간 80% 이상 겹침 → Readwise 제거)
+    pool, dedup_removed = deduplicate_pool(pool)
+    if dedup_removed:
+        print(f"\n🧹 중복 데이터 {dedup_removed}개를 발견하여 Heptabase 우선순위로 정리했습니다")
+
+    # ── 후보군 30개 선정 → 최신 3 고정 + 무작위 3
     candidates = pool[:CURATION_POOL_SIZE]
 
     fixed_slots  = candidates[:CURATION_FIXED]
@@ -630,7 +682,7 @@ def curate_sources(
 
     selected = fixed_slots + random_slots
 
-    print(f"\n🎯 5:5 큐레이션: 전체 {len(pool)}개 → 후보 {len(candidates)}개")
+    print(f"\n🎯 5:5 큐레이션: 전체 {len(pool)}개(중복제거 후) → 후보 {len(candidates)}개")
     print(f"   ├ [최신 {len(fixed_slots)}개 고정]")
     for s in fixed_slots:
         tag = "🏷️ 로컬" if s["stype"] == "local" else "📚 RW"
