@@ -133,7 +133,15 @@ def fetch_archive_ab(max_chars_per_file: int = 600) -> tuple:
 # ── File API 업로드 ─────────────────────────────────────────
 def upload_to_gemini(fpath: str, mime_type: str):
     """파일 업로드 후 ACTIVE 상태 대기. 실패 시 None 반환."""
-    # ── 임시 디렉토리 격리 복사 → 파일 시스템 잠금 근본 차단 ──
+    # ── [방어 1] GDrive 온라인 전용 파일 로컬 다운로드 강제 트리거 ──
+    if not fpath.endswith((".gdoc", ".gslides", ".gdraw")):
+        try:
+            with open(fpath, "rb") as pre_f:
+                pre_f.read(1)   # 1바이트 읽기 → OS에 다운로드 신호 송신
+        except Exception as e:
+            print(f"  ⚠️ GDrive 동기화 트리거 실패: {e}")
+
+    # ── [방어 2] 임시 디렉토리 격리 복사 → 파일 시스템 잠금 근본 차단 ──
     uploaded = None
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = os.path.join(tmp_dir, os.path.basename(fpath))
@@ -357,6 +365,12 @@ def collect_inbox_files() -> list[tuple[str, str, str]]:
             ext   = os.path.splitext(fname)[1].lower()
             if os.path.isfile(fpath) and ext in SUPPORTED_EXTS:
                 items.append((fpath, fname, INBOX))
+            # 하위 폴더 재귀 .md 탐색 (Heptabase 등 폴더 내보내기 구조)
+            elif os.path.isdir(fpath) and fpath != AI_INBOX:
+                for root, _, sub_files in os.walk(fpath):
+                    for sub_fname in sorted(sub_files):
+                        if sub_fname.endswith(".md"):
+                            items.append((os.path.join(root, sub_fname), sub_fname, root))
     if os.path.isdir(AI_INBOX):
         for fname in sorted(os.listdir(AI_INBOX)):
             fpath = os.path.join(AI_INBOX, fname)
