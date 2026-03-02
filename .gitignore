@@ -17,7 +17,7 @@ ENV/
 # PKMS
 .pkms.db
 *.log
-_internal_system/pkms/logs/*.log
+_internal_system/pkms/logs/
 
 # Environment
 .env
