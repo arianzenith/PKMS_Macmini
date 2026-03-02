@@ -44,7 +44,8 @@ def analyze(title: str, body: str, source: str) -> str | None:
     now       = datetime.now()
     date_tag  = now.strftime("%y%m%d")
     time_tag  = now.strftime("%H%M%S")
-    out_name  = f"{date_tag}_Zettelkasten_{time_tag}.txt"
+    safe_title = "".join(c for c in title if c.isalnum() or c in " _-가-힣")[:30].strip()
+    out_name  = f"{date_tag}_Zettelkasten_{time_tag}_{safe_title}.txt"
 
     prompt = (
         f"다음 내용을 제텔카스텐 방식의 영구 노트(Permanent Note)로 작성해줘.\n\n"
