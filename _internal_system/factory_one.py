@@ -17,7 +17,9 @@ AI_INBOX          = os.path.join(INBOX, "AI_Inbox")
 ARCHIVE           = os.path.join(BASE_DIR, "02_Archive")
 SOURCES           = os.path.join(ARCHIVE, "sources")
 MODEL_ID          = "gemini-2.5-pro"
-CONTEXT_THRESHOLD = 7   # 맥락 점수 ≥ 7 이면 즉시 웹훅
+BUFFER_FILE       = os.path.join(BASE_DIR, "_internal_system/pkms/fusion_buffer.json")
+WEBHOOK_MIN_NODES = 6    # 버퍼 노드 ≥ 6개 도달 시 묶음 발송
+WEBHOOK_MAX_NODES = 10   # 회당 최대 발송 노드 수
 
 # ── 파일 형식 분류 ─────────────────────────────────────────
 MIME_MAP = {
@@ -41,6 +43,22 @@ if not GOOGLE_API_KEY:
 
 os.makedirs(SOURCES, exist_ok=True)
 client = genai.Client(api_key=GOOGLE_API_KEY)
+
+
+# ── 융합 버퍼 (cron 재기동 간 영속화) ───────────────────────
+def load_buffer() -> list:
+    if os.path.exists(BUFFER_FILE):
+        try:
+            with open(BUFFER_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+
+def save_buffer(buf: list):
+    with open(BUFFER_FILE, "w", encoding="utf-8") as f:
+        json.dump(buf, f, ensure_ascii=False)
 
 
 # ── Webhook ────────────────────────────────────────────────
@@ -461,24 +479,39 @@ def run_cycle():
         print("  ─ 신규 항목 없음")
         return
 
-    score    = outcome["score"]
-    n        = outcome["n"]
-    out_name = outcome["out_name"]
-    footer   = (
+    # ── 버퍼에 노드 누적 ──────────────────────────────────
+    buf = load_buffer()
+    buf.append({
+        "out_name": outcome["out_name"],
+        "score":    outcome["score"],
+        "n":        outcome["n"],
+        "ts":       datetime.now().strftime("%H:%M"),
+    })
+    save_buffer(buf)
+    print(f"  📦 버퍼 누적: {len(buf)}/{WEBHOOK_MIN_NODES}개")
+
+    # ── 임계점 도달 시 묶음 발송 ──────────────────────────
+    if len(buf) < WEBHOOK_MIN_NODES:
+        print(f"  📁 임계점 미달 — 아침 8시 리포트에 포함")
+        return
+
+    nodes_to_send = buf[:WEBHOOK_MAX_NODES]
+    footer = (
         "\n\n🔗 <https://notebooklm.google.com/notebook/b67639c2-e8f8-4af2-a686-4e91d27875e3?authuser=1|제텔카스텐 전략실 바로가기>"
         "\n📂 <https://drive.google.com/drive/u/1/folders/1TmwPlc6JCtYbSwXzRonI3BeehLX059Vg|오늘자 원문 (Google Drive)>"
     )
-
-    if score >= CONTEXT_THRESHOLD:
-        msg = (
-            f"🔗 융합 노드 생성 [{datetime.now().strftime('%H:%M')}]\n"
-            f"소스 {n}개 → 맥락 점수 {score}/10\n"
-            f"파일: {out_name}"
-        )
-        send_webhook(msg + footer)
-        print(f"  📡 Webhook 전송 (맥락 점수 {score} ≥ {CONTEXT_THRESHOLD})")
-    else:
-        print(f"  📁 맥락 점수 {score}/10 — 아침 8시 리포트에 포함")
+    node_lines = "\n".join(
+        f"  • {nd['out_name']} (점수:{nd['score']}/10, {nd['ts']})"
+        for nd in nodes_to_send
+    )
+    msg = (
+        f"🔗 융합 지식 노드 묶음 [{datetime.now().strftime('%H:%M')}]\n"
+        f"{len(nodes_to_send)}개 노드 생성 완료\n\n"
+        f"{node_lines}"
+    )
+    send_webhook(msg + footer)
+    save_buffer(buf[len(nodes_to_send):])   # 발송된 노드 제거
+    print(f"  📡 Webhook 전송 ({len(nodes_to_send)}개 묶음 발송)")
 
 
 if __name__ == "__main__":
