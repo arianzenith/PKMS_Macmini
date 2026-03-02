@@ -13,6 +13,7 @@ load_dotenv(ENV_PATH)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 WEBHOOK_URL    = os.getenv("WEBHOOK_URL")
 INBOX          = os.path.join(BASE_DIR, "01_Inbox")
+AI_INBOX       = os.path.join(INBOX, "AI_Inbox")   # 회사GD → 개인GD 업무파일 경로
 ARCHIVE        = os.path.join(BASE_DIR, "02_Archive")
 SOURCES        = os.path.join(ARCHIVE, "sources")
 MODEL_ID       = "gemini-2.5-pro"
@@ -202,51 +203,85 @@ def save_zettelkasten(content: str, label: str) -> str:
     print(f"  ✅ 저장: {out_name}")
     return out_name
 
+# ── PDF 텍스트 추출 ────────────────────────────────────────
+def read_pdf(fpath: str) -> str:
+    try:
+        import pdfplumber
+        with pdfplumber.open(fpath) as pdf:
+            return "\n".join(page.extract_text() or "" for page in pdf.pages).strip()
+    except ImportError:
+        print("  ⚠️ pdfplumber 미설치. pip install pdfplumber")
+        return ""
+    except Exception as e:
+        print(f"  ❌ PDF 읽기 실패: {e}")
+        return ""
+
+
+# ── 파일 수집 (루트 + AI_Inbox) ────────────────────────────
+def collect_inbox_files() -> list[tuple[str, str, str]]:
+    """(fpath, fname, inbox_dir) 튜플 목록 반환"""
+    import unicodedata
+    items = []
+
+    # 01_Inbox 루트: .md / .txt
+    if os.path.isdir(INBOX):
+        for fname in sorted(os.listdir(INBOX)):
+            fpath = os.path.join(INBOX, fname)
+            if os.path.isfile(fpath) and fname.endswith((".md", ".txt")):
+                items.append((fpath, fname, INBOX))
+
+    # AI_Inbox 서브폴더: .md / .txt / .pdf (항상 Source C)
+    if os.path.isdir(AI_INBOX):
+        for fname in sorted(os.listdir(AI_INBOX)):
+            fpath = os.path.join(AI_INBOX, fname)
+            if os.path.isfile(fpath) and fname.endswith((".md", ".txt", ".pdf")):
+                items.append((fpath, fname, AI_INBOX))
+
+    return items
+
+
 # ── 01_Inbox 처리 ──────────────────────────────────────────
 def process_inbox() -> list:
-    results = []
-    if not os.path.isdir(INBOX):
-        return results
+    import unicodedata
 
-    files = sorted(
-        f for f in os.listdir(INBOX)
-        if os.path.isfile(os.path.join(INBOX, f))
-        and f.endswith((".md", ".txt"))
-    )
+    all_files = collect_inbox_files()
+    if not all_files:
+        return []
 
-    if not files:
-        return results
-
-    # Source C 여부 판별
-    c_files = [f for f in files if detect_source(f) == "C"]
-
-    # Source C가 있으면 A/B 아카이브 미리 로드
+    # Source C 파일이 있으면 A/B 아카이브 미리 로드
+    c_exists = any(detect_source(fname) == "C" or inbox_dir == AI_INBOX
+                   for _, fname, inbox_dir in all_files)
     a_names, a_text, b_names, b_text = [], "", [], ""
-    if c_files:
+    if c_exists:
         a_names, a_text, b_names, b_text = fetch_archive_ab()
 
-    for fname in files:
-        fpath  = os.path.join(INBOX, fname)
+    results = []
+    for fpath, fname, inbox_dir in all_files:
         title  = os.path.splitext(fname)[0]
-        source = detect_source(fname)
+        # AI_Inbox 파일은 항상 Source C
+        source = "C" if inbox_dir == AI_INBOX else detect_source(fname)
 
         # macOS NFC/NFD 한글 파일명 인코딩 대응
-        import unicodedata
         actual_fname = None
-        for f in os.listdir(INBOX):
+        for f in os.listdir(inbox_dir):
             if unicodedata.normalize('NFC', f) == unicodedata.normalize('NFC', fname):
                 actual_fname = f
                 break
         if not actual_fname:
             print(f"  ❌ 파일 없음 {fname}")
             continue
-        actual_fpath = os.path.join(INBOX, actual_fname)
-        try:
-            with open(actual_fpath, "r", encoding="utf-8") as f:
-                body = f.read().strip()
-        except Exception as e:
-            print(f"  ❌ 읽기 실패 {fname}: {e}")
-            continue
+        actual_fpath = os.path.join(inbox_dir, actual_fname)
+
+        # 파일 읽기 (PDF / 텍스트 분기)
+        if fname.lower().endswith(".pdf"):
+            body = read_pdf(actual_fpath)
+        else:
+            try:
+                with open(actual_fpath, "r", encoding="utf-8") as f:
+                    body = f.read().strip()
+            except Exception as e:
+                print(f"  ❌ 읽기 실패 {fname}: {e}")
+                continue
 
         if not body:
             continue
@@ -260,14 +295,9 @@ def process_inbox() -> list:
         if result:
             out_name = save_zettelkasten(result, title)
             try:
-                shutil.move(fpath, os.path.join(SOURCES, fname))
-            except FileNotFoundError:
-                # macOS 한글 파일명 NFC/NFD 인코딩 차이 대응
-                import unicodedata
-                for f in os.listdir(INBOX):
-                    if unicodedata.normalize('NFC', f) == unicodedata.normalize('NFC', fname):
-                        shutil.move(os.path.join(INBOX, f), os.path.join(SOURCES, f))
-                        break
+                shutil.move(actual_fpath, os.path.join(SOURCES, actual_fname))
+            except Exception as e:
+                print(f"  ⚠️ 파일 이동 실패 {fname}: {e}")
             results.append(out_name)
             time.sleep(1)
 
