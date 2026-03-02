@@ -30,3 +30,7 @@ _internal_system/pkms/logs/*.log
 
 # Output files
 *.gdoc
+02_Archive/
+99_Legacy_Archive/
+01_Inbox/
+01_Processing/
