@@ -74,15 +74,15 @@ tell application "Notes"
         set h  to hours of modDate as integer
         set mn to minutes of modDate as integer
         set s  to seconds of modDate as integer
-        set pad to {"0" & (mo as string)}
+        set pad to {{"0" & (mo as string)}}
         set moStr to text -2 thru -1 of pad
-        set pad to {"0" & (d as string)}
+        set pad to {{"0" & (d as string)}}
         set dStr to text -2 thru -1 of pad
-        set pad to {"0" & (h as string)}
+        set pad to {{"0" & (h as string)}}
         set hStr to text -2 thru -1 of pad
-        set pad to {"0" & (mn as string)}
+        set pad to {{"0" & (mn as string)}}
         set mnStr to text -2 thru -1 of pad
-        set pad to {"0" & (s as string)}
+        set pad to {{"0" & (s as string)}}
         set sStr to text -2 thru -1 of pad
         set dateStr to (y as string) & "-" & moStr & "-" & dStr & "T" & hStr & ":" & mnStr & ":" & sStr
         set noteBody to plaintext of theNote
