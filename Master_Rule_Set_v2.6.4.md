@@ -1,0 +1,1 @@
+pbpaste > /Users/arian/GDrive/NotebookLM_Staging/Master_Rule_Set_v2.6.4.md
