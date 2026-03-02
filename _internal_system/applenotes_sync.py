@@ -1,4 +1,4 @@
-import os, json, time, subprocess
+import os, json, time, subprocess, re
 from datetime import datetime
 from urllib import request as urllib_request
 from urllib.error import URLError
@@ -48,6 +48,29 @@ def save_last_sync(dt: datetime):
         f.write(dt.isoformat())
 
 
+# ── AppleScript 날짜 파싱 ──────────────────────────────────
+def parse_apple_date(date_str: str) -> datetime | None:
+    """
+    AppleScript (modification date) as string 출력 파싱.
+    한국어 로케일: '2026. 3. 2. 오후 4:30:00'
+    영어 로케일:   'Sunday, March 2, 2026 at 4:30:00 PM'
+    숫자를 순서대로 추출 후 오전/오후·AM/PM 보정.
+    """
+    nums = re.findall(r'\d+', date_str)
+    if len(nums) < 6:
+        return None
+    try:
+        y, mo, d, h, mn, s = (int(n) for n in nums[:6])
+        if '오후' in date_str or 'PM' in date_str.upper():
+            if h != 12:
+                h += 12
+        elif ('오전' in date_str or 'AM' in date_str.upper()) and h == 12:
+            h = 0
+        return datetime(y, mo, d, h, mn, s)
+    except Exception:
+        return None
+
+
 # ── AppleScript 실행 ───────────────────────────────────────
 def fetch_notes() -> list[dict]:
     """메모앱 00_생각공장 폴더에서 모든 메모 가져오기"""
@@ -67,24 +90,7 @@ tell application "Notes"
     end if
     repeat with theNote in (notes in theFolder)
         set noteTitle to name of theNote
-        set modDate to modification date of theNote
-        set y  to year of modDate as integer
-        set mo to month of modDate as integer
-        set d  to day of modDate as integer
-        set h  to hours of modDate as integer
-        set mn to minutes of modDate as integer
-        set s  to seconds of modDate as integer
-        set pad to {{"0" & (mo as string)}}
-        set moStr to text -2 thru -1 of pad
-        set pad to {{"0" & (d as string)}}
-        set dStr to text -2 thru -1 of pad
-        set pad to {{"0" & (h as string)}}
-        set hStr to text -2 thru -1 of pad
-        set pad to {{"0" & (mn as string)}}
-        set mnStr to text -2 thru -1 of pad
-        set pad to {{"0" & (s as string)}}
-        set sStr to text -2 thru -1 of pad
-        set dateStr to (y as string) & "-" & moStr & "-" & dStr & "T" & hStr & ":" & mnStr & ":" & sStr
+        set dateStr to (modification date of theNote) as string
         set noteBody to plaintext of theNote
         set theOutput to theOutput & "<<<NOTE>>>" & noteTitle & "<<<DATE>>>" & dateStr & "<<<BODY>>>" & noteBody & "<<<END>>>"
     end repeat
@@ -121,10 +127,14 @@ end tell
                 title, rest   = block.split("<<<DATE>>>", 1)
                 date_str, rest = rest.split("<<<BODY>>>", 1)
                 body, _       = rest.split("<<<END>>>", 1)
+                mod_dt = parse_apple_date(date_str.strip())
+                if mod_dt is None:
+                    print(f"  ⚠️ 날짜 파싱 실패: {date_str.strip()!r}")
+                    continue
                 notes.append({
                     "title":    title.strip(),
                     "body":     body.strip(),
-                    "modified": datetime.fromisoformat(date_str.strip()),
+                    "modified": mod_dt,
                 })
             except Exception as e:
                 print(f"  ⚠️ 메모 파싱 오류: {e}")
