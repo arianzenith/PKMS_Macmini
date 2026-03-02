@@ -159,13 +159,15 @@ def run():
     print(f"  ✅ 저장: {out_name} ({len(result)}자)")
 
     preview = result[:300].replace("\n", " ")
-    send_webhook(
+    msg = (
         f"🌅 아침 융합 리포트 [{now.strftime('%H:%M')}]\n"
         f"소스: Readwise {len(readwise_files)}개 + 메모 {len(memo_files)}개\n"
         f"글자 수: {len(result)}자\n"
         f"파일: {out_name}\n\n"
         f"{preview}…"
     )
+    footer = "\n\n🔗 <https://notebooklm.google.com/notebook/b67639c2-e8f8-4af2-a686-4e91d27875e3?authuser=1|제텔카스텐 전략실 바로가기>\n📂 <https://drive.google.com/drive/u/1/folders/1TmwPlc6JCtYbSwXzRonI3BeehLX059Vg|오늘자 원문 (Google Drive)>"
+    send_webhook(msg + footer)
     print(f"  📡 Webhook 전송")
 
 

@@ -286,7 +286,8 @@ def run_cycle():
             f"처리 완료 {len(all_done)}개\n"
             + "\n".join(f"  • {f}" for f in all_done)
         )
-        send_webhook(msg)
+        footer = "\n\n🔗 <https://notebooklm.google.com/notebook/b67639c2-e8f8-4af2-a686-4e91d27875e3?authuser=1|제텔카스텐 전략실 바로가기>\n📂 <https://drive.google.com/drive/u/1/folders/1TmwPlc6JCtYbSwXzRonI3BeehLX059Vg|오늘자 원문 (Google Drive)>"
+        send_webhook(msg + footer)
         print(f"  📡 Webhook 전송")
     else:
         print("  ─ 신규 항목 없음")
