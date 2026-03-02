@@ -248,7 +248,15 @@ def process_inbox() -> list:
         result = call_gemini(prompt, title)
         if result:
             out_name = save_zettelkasten(result, title)
-            shutil.move(fpath, os.path.join(SOURCES, fname))
+            try:
+                shutil.move(fpath, os.path.join(SOURCES, fname))
+            except FileNotFoundError:
+                # macOS 한글 파일명 NFC/NFD 인코딩 차이 대응
+                import unicodedata
+                for f in os.listdir(INBOX):
+                    if unicodedata.normalize('NFC', f) == unicodedata.normalize('NFC', fname):
+                        shutil.move(os.path.join(INBOX, f), os.path.join(SOURCES, f))
+                        break
             results.append(out_name)
             time.sleep(1)
 
