@@ -133,12 +133,6 @@ def run_cycle():
     else:
         print("  ─ 신규 항목 없음")
 
-# ── 진입점 ─────────────────────────────────────────────────
+# ── 진입점 (1회 실행 후 종료 — cron이 스케줄 담당) ──────────
 if __name__ == "__main__":
-    print("🏭 공장 가동 — 01_Inbox 루트 감시 시작 (5분 간격, Ctrl+C 종료)")
-    print(f"   소스 구분: 파일명 키워드 (Readwise / AppleNotes)")
-    print(f"   출고 경로: {ARCHIVE}")
-    while True:
-        run_cycle()
-        print(f"💤 {POLL_INTERVAL // 60}분 대기...")
-        time.sleep(POLL_INTERVAL)
+    run_cycle()
