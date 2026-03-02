@@ -230,8 +230,19 @@ def process_inbox() -> list:
         title  = os.path.splitext(fname)[0]
         source = detect_source(fname)
 
+        # macOS NFC/NFD 한글 파일명 인코딩 대응
+        import unicodedata
+        actual_fname = None
+        for f in os.listdir(INBOX):
+            if unicodedata.normalize('NFC', f) == unicodedata.normalize('NFC', fname):
+                actual_fname = f
+                break
+        if not actual_fname:
+            print(f"  ❌ 파일 없음 {fname}")
+            continue
+        actual_fpath = os.path.join(INBOX, actual_fname)
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
+            with open(actual_fpath, "r", encoding="utf-8") as f:
                 body = f.read().strip()
         except Exception as e:
             print(f"  ❌ 읽기 실패 {fname}: {e}")
