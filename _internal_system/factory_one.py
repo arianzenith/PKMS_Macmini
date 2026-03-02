@@ -1,4 +1,4 @@
-import gc, os, re, shutil, time, json, glob
+import gc, os, re, shutil, tempfile, time, json, glob
 from datetime import datetime
 from urllib import request as urllib_request
 from urllib.error import URLError
@@ -115,36 +115,40 @@ def fetch_archive_ab(max_chars_per_file: int = 600) -> tuple:
 # ── File API 업로드 ─────────────────────────────────────────
 def upload_to_gemini(fpath: str, mime_type: str):
     """파일 업로드 후 ACTIVE 상태 대기. 실패 시 None 반환."""
-    # ── 업로드 (OSError 11 데드락 재시도) ─────────────────────
+    # ── 임시 디렉토리 격리 복사 → 파일 시스템 잠금 근본 차단 ──
     uploaded = None
-    for attempt in range(3):
-        try:
-            print(f"  📤 File API 업로드 중... ({mime_type})")
-            with open(fpath, "rb") as fh:
-                uploaded = client.files.upload(file=fh, config={"mime_type": mime_type})
-            break
-        except OSError as e:
-            if e.errno == 11:   # EDEADLK — Resource deadlock avoided
-                gc.collect()
-                wait = 1 * (attempt + 1)
-                print(f"  ⚠️ OSError 11 — {wait}초 후 재시도 ({attempt + 1}/3)")
-                time.sleep(wait)
-            else:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = os.path.join(tmp_dir, os.path.basename(fpath))
+        shutil.copy2(fpath, tmp_path)
+
+        for attempt in range(3):
+            try:
+                print(f"  📤 File API 업로드 중... ({mime_type})")
+                with open(tmp_path, "rb") as fh:
+                    uploaded = client.files.upload(file=fh, config={"mime_type": mime_type})
+                break
+            except OSError as e:
+                if e.errno == 11 or "deadlock" in str(e).lower():   # EDEADLK
+                    gc.collect()
+                    wait = 1.5 * (attempt + 1)
+                    print(f"  ⚠️ OSError 11 — {wait:.1f}초 후 재시도 ({attempt + 1}/3)")
+                    time.sleep(wait)
+                else:
+                    msg = f"❌ File API 업로드 오류 [{datetime.now().strftime('%H:%M')}]\n{str(e)}"
+                    print(f"  {msg}")
+                    send_webhook(msg)
+                    return None
+            except Exception as e:
                 msg = f"❌ File API 업로드 오류 [{datetime.now().strftime('%H:%M')}]\n{str(e)}"
                 print(f"  {msg}")
                 send_webhook(msg)
                 return None
-        except Exception as e:
-            msg = f"❌ File API 업로드 오류 [{datetime.now().strftime('%H:%M')}]\n{str(e)}"
+
+        if uploaded is None:
+            msg = f"❌ File API 업로드 3회 실패 (OSError 11): {fpath}"
             print(f"  {msg}")
             send_webhook(msg)
             return None
-
-    if uploaded is None:
-        msg = f"❌ File API 업로드 3회 실패 (OSError 11): {fpath}"
-        print(f"  {msg}")
-        send_webhook(msg)
-        return None
 
     # ── ACTIVE 상태 대기 ──────────────────────────────────────
     for _ in range(30):
