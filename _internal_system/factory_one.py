@@ -108,10 +108,8 @@ def upload_to_gemini(fpath: str, mime_type: str):
     """파일 업로드 후 ACTIVE 상태 대기. 실패 시 None 반환."""
     try:
         print(f"  📤 File API 업로드 중... ({mime_type})")
-        uploaded = client.files.upload(
-            path=fpath,
-            config={"mime_type": mime_type}
-        )
+        with open(fpath, "rb") as f:
+            uploaded = client.files.upload(file=f, config={"mime_type": mime_type})
         # ACTIVE 될 때까지 대기 (최대 60초)
         for _ in range(30):
             f = client.files.get(name=uploaded.name)
