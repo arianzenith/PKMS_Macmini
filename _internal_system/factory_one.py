@@ -47,10 +47,18 @@ def analyze(title: str, body: str, source: str) -> str | None:
     out_name  = f"{date_tag}_Zettelkasten_{time_tag}.txt"
 
     prompt = (
-        f"다음 내용을 제텔카스텐 방식으로 분석해줘.\n"
-        f"영구 노트(Permanent Note) 형식으로, 핵심 아이디어를 자신의 언어로 재서술하고 "
-        f"연결 가능한 개념을 명시해.\n\n"
-        f"제목: {title}\n\n{body}"
+        f"다음 내용을 제텔카스텐 방식의 영구 노트(Permanent Note)로 작성해줘.\n\n"
+        f"반드시 아래 3개 섹션을 포함할 것:\n\n"
+        f"## 💡 통찰 (Insight)\n"
+        f"핵심 아이디어를 자신의 언어로 재서술. 단순 요약 금지. 왜 중요한지 포함.\n\n"
+        f"## 🔗 연결 (Link)\n"
+        f"이 아이디어와 연결되는 개념, 책, 이론, 경험을 3개 이상 명시.\n\n"
+        f"## 🏷️ 키워드 (Tag)\n"
+        f"검색 가능한 핵심 태그를 5개 이상 #태그 형식으로 작성.\n\n"
+        f"---\n"
+        f"제목: {title}\n"
+        f"출처: {source}\n\n"
+        f"{body}"
     )
 
     for attempt in range(3):
