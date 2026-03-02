@@ -25,3 +25,4 @@ python3 _internal_system/factory_one.py
 - 모델: Gemini 2.5 Pro
 - 원본: 처리 후 `02_Archive/sources/`로 이동
 - 보고: 완료 시 Webhook 전송
+## Current System State: v2.6.9 Hard-Coded in Claude Code
