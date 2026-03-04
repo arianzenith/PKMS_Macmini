@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>생각 공장 프로젝트</title>
+<style>
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #080d1a;
+  --surface:     #0f1628;
+  --surface2:    #162035;
+  --gold:        #c8a96e;
+  --gold-light:  #e5c99a;
+  --gold-dim:    rgba(200,169,110,0.12);
+  --gold-border: rgba(200,169,110,0.25);
+  --white:       #eef2ff;
+  --muted:       rgba(238,242,255,0.55);
+  --dimmer:      rgba(238,242,255,0.22);
+  --blue:        #4f8fff;
+  --red:         #ff6b6b;
+  --radius:      14px;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--white);
+  font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
+               'Noto Sans KR', 'Pretendard', sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Ambient background ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 10%, rgba(79,143,255,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 10% 90%, rgba(200,169,110,0.07) 0%, transparent 60%);
+  pointer-events: none; z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(200,169,110,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(200,169,110,0.025) 1px, transparent 1px);
+  background-size: 72px 72px;
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Progress bar ── */
+#progress {
+  position: fixed; top: 0; left: 0; height: 2px;
+  background: linear-gradient(90deg, var(--gold), var(--gold-light));
+  transition: width .45s cubic-bezier(.4,0,.2,1);
+  z-index: 200;
+}
+
+/* ── Slide counter ── */
+#counter {
+  position: fixed; top: 22px; right: 36px;
+  font-size: 11px; font-weight: 500;
+  color: var(--dimmer); letter-spacing: 2.5px;
+  z-index: 200;
+}
+
+/* ── Navigation arrows ── */
+.nav-btn {
+  position: fixed; top: 50%; transform: translateY(-50%);
+  width: 46px; height: 46px; border-radius: 50%;
+  background: rgba(15,22,40,0.7); backdrop-filter: blur(8px);
+  border: 1px solid var(--gold-border);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--muted);
+  transition: background .2s, border-color .2s, color .2s;
+  z-index: 200;
+}
+.nav-btn:hover { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
+#nav-prev { left: 22px; }
+#nav-next { right: 22px; }
+
+/* ── Dots ── */
+#dots {
+  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 9px; z-index: 200;
+}
+.dot {
+  width: 6px; height: 6px; border-radius: 3px;
+  background: var(--dimmer); cursor: pointer;
+  transition: background .3s, width .3s;
+}
+.dot.on { background: var(--gold); width: 22px; }
+
+/* ── Deck & Slides ── */
+#deck { position: relative; width: 100vw; height: 100vh; overflow: hidden; z-index: 1; }
+
+.slide {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 56px 88px 72px;
+  opacity: 0; pointer-events: none;
+  transition: opacity .45s cubic-bezier(.4,0,.2,1), transform .45s cubic-bezier(.4,0,.2,1);
+}
+.slide.active { opacity: 1; pointer-events: all; transform: translateX(0) !important; }
+
+/* ── Shared components ── */
+.badge {
+  display: inline-block;
+  padding: 4px 13px; border-radius: 100px;
+  border: 1px solid var(--gold); color: var(--gold);
+  font-size: 10px; font-weight: 700; letter-spacing: 2.5px;
+  text-transform: uppercase; margin-bottom: 18px;
+}
+
+.slide-title {
+  font-size: clamp(26px, 3.4vw, 50px);
+  font-weight: 700; line-height: 1.18;
+  color: var(--white); margin-bottom: 10px;
+}
+
+.slide-sub {
+  font-size: clamp(13px, 1.6vw, 20px);
+  color: var(--gold-light); font-weight: 400; margin-bottom: 6px;
+}
+
+.divider {
+  width: 44px; height: 2px;
+  background: linear-gradient(90deg, var(--gold), transparent);
+  margin: 18px 0;
+}
+
+.slide-desc {
+  font-size: 14px; color: var(--muted); line-height: 1.85;
+}
+
+.wide { width: 100%; max-width: 1180px; }
+
+/* ══════════════════ SLIDE LAYOUTS ══════════════════ */
+
+/* ── COVER ── */
+.cover-grid {
+  display: grid; grid-template-columns: 1fr 1.1fr;
+  gap: 72px; align-items: center;
+  width: 100%; max-width: 1100px;
+}
+.icon-hero {
+  display: flex; align-items: center; justify-content: center;
+}
+.hero-circle {
+  width: 240px; height: 240px; border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, var(--surface2) 0%, var(--surface) 100%);
+  border: 1px solid var(--gold-border);
+  box-shadow: 0 0 100px rgba(200,169,110,0.1), inset 0 1px 0 rgba(255,255,255,0.04);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--gold); animation: pulse-glow 4s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%,100% { box-shadow: 0 0 80px rgba(200,169,110,0.08); }
+  50%      { box-shadow: 0 0 120px rgba(200,169,110,0.18); }
+}
+.cover-author {
+  margin-top: 30px; font-size: 12px; color: var(--dimmer); letter-spacing: 1.5px;
+}
+
+/* ── THREE CARDS ── */
+.three-col {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 18px; margin-top: 10px;
+}
+.card {
+  background: var(--surface); border: 1px solid rgba(200,169,110,0.15);
+  border-radius: var(--radius); padding: 26px 22px;
+  transition: border-color .2s, transform .2s;
+}
+.card:hover { border-color: var(--gold); transform: translateY(-2px); }
+.card-icon {
+  width: 44px; height: 44px; border-radius: 10px;
+  background: var(--gold-dim); color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.card-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+.card-desc  { font-size: 13px; color: var(--muted); line-height: 1.72; }
+
+/* ── PIPELINE ── */
+.pipeline {
+  display: flex; align-items: stretch; gap: 0; margin-top: 14px;
+}
+.pipe-step {
+  flex: 1; background: var(--surface);
+  border: 1px solid rgba(200,169,110,0.15); border-radius: var(--radius);
+  padding: 28px 20px; text-align: center;
+}
+.pipe-arrow {
+  flex-shrink: 0; width: 36px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--gold); font-size: 18px; opacity: .7;
+}
+.pipe-num {
+  font-size: 10px; font-weight: 700; color: var(--gold);
+  letter-spacing: 2.5px; margin-bottom: 14px;
+}
+.pipe-icon {
+  width: 50px; height: 50px; border-radius: 12px;
+  background: var(--gold-dim); color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 14px;
+}
+.pipe-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.pipe-desc  { font-size: 12px; color: var(--muted); line-height: 1.65; white-space: pre-line; }
+
+/* ── DIALECTIC ── */
+.dialectic {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 18px; margin-top: 10px;
+}
+.dial-card {
+  background: var(--surface); border: 1px solid rgba(200,169,110,0.15);
+  border-radius: var(--radius); padding: 26px 20px; position: relative; overflow: hidden;
+}
+.dial-card::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+}
+.dial-card.q1::after { background: var(--blue); }
+.dial-card.q2::after { background: var(--red); }
+.dial-card.q3::after { background: var(--gold); }
+.dial-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; margin-bottom: 9px;
+}
+.q1 .dial-label { color: var(--blue); }
+.q2 .dial-label { color: var(--red); }
+.q3 .dial-label { color: var(--gold); }
+.dial-title { font-size: 16px; font-weight: 700; margin-bottom: 9px; }
+.dial-desc  { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 14px; }
+.dial-item  {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 6px;
+}
+.dial-item::before { content: '→'; color: var(--gold); font-size: 11px; flex-shrink: 0; margin-top: 1px; }
+
+/* ── OUTPUT / NOTIFICATION ── */
+.output-grid {
+  display: grid; grid-template-columns: 1fr 1.15fr;
+  gap: 60px; align-items: center;
+  width: 100%; max-width: 1100px;
+}
+.output-points { display: flex; flex-direction: column; gap: 16px; margin-top: 10px; }
+.output-point  { display: flex; gap: 12px; align-items: flex-start; }
+.pt-diamond    { color: var(--gold); flex-shrink: 0; margin-top: 3px; font-size: 10px; }
+.pt-text       { font-size: 13px; color: var(--muted); line-height: 1.65; }
+
+.notif-mock {
+  background: #12141e; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px; overflow: hidden;
+  box-shadow: 0 28px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+}
+.notif-bar {
+  height: 3px;
+  background: linear-gradient(90deg, #1a5276, var(--blue), var(--gold));
+}
+.notif-head {
+  background: #0c1730; padding: 12px 15px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.notif-avatar {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--gold), #a07840);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; color: #000;
+}
+.notif-from { font-size: 13px; font-weight: 600; color: #fff; }
+.notif-time { font-size: 10px; color: rgba(255,255,255,0.35); }
+.notif-body {
+  padding: 14px 15px;
+  font-size: 11.5px; color: rgba(255,255,255,0.65); line-height: 1.8;
+}
+.nb { font-weight: 600; color: #fff; }
+.ng { color: var(--gold-light); }
+.nl { color: #5b9eff; text-decoration: underline; cursor: pointer; }
+.nq {
+  margin-top: 10px; padding: 9px 11px;
+  background: rgba(200,169,110,0.1); border-left: 2px solid var(--gold);
+  border-radius: 0 6px 6px 0;
+  color: var(--gold-light); font-style: italic; font-size: 11px; line-height: 1.6;
+}
+
+/* ── BUSINESS ── */
+.biz-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: 14px; margin-top: 12px;
+}
+.biz-card {
+  background: var(--surface); border: 1px solid rgba(200,169,110,0.15);
+  border-radius: var(--radius); padding: 20px 18px;
+  display: flex; gap: 14px; align-items: flex-start;
+  transition: border-color .2s;
+}
+.biz-card:hover { border-color: var(--gold); }
+.biz-icon {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 10px;
+  background: var(--gold-dim); color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+}
+.biz-t { font-size: 14px; font-weight: 600; margin-bottom: 5px; }
+.biz-d { font-size: 12px; color: var(--muted); line-height: 1.65; }
+
+/* ── CLOSING ── */
+.closing-wrap { text-align: center; max-width: 740px; }
+.closing-icon {
+  width: 80px; height: 80px; border-radius: 50%;
+  background: radial-gradient(circle, var(--surface2), var(--surface));
+  border: 1px solid var(--gold-border);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 28px; color: var(--gold);
+}
+.closing-quote {
+  font-size: clamp(18px, 2.6vw, 34px); font-weight: 300;
+  line-height: 1.55; color: var(--white);
+}
+.closing-quote em { color: var(--gold); font-style: normal; font-weight: 700; }
+.closing-tag {
+  margin-top: 36px; font-size: 11px; color: var(--dimmer);
+  letter-spacing: 3px; text-transform: uppercase;
+}
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+<div id="counter"></div>
+
+<div id="deck"></div>
+
+<div id="dots"></div>
+
+<button class="nav-btn" id="nav-prev" aria-label="이전 슬라이드">
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+    <polyline points="15 18 9 12 15 6"/>
+  </svg>
+</button>
+<button class="nav-btn" id="nav-next" aria-label="다음 슬라이드">
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+    <polyline points="9 18 15 12 9 6"/>
+  </svg>
+</button>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  SLIDE_DATA  — 이 객체만 수정하면 발표 내용이 즉시 바뀝니다
+// ═══════════════════════════════════════════════════════════════════════════
+const SLIDE_DATA = [
+  {
+    id: 1, type: 'cover',
+    badge: 'PERSONAL PROJECT · 2026',
+    title: '죽어있는 하이라이트를\n깨우다',
+    subtitle: '생각 공장 프로젝트 (Thought Factory)',
+    description: '5년간 쌓인 1,200개의 Readwise 하이라이트.\n그 중 실제로 내 사고를 바꾼 것은 몇 개였을까?\n\n이 프로젝트는 그 질문에서 시작됐습니다.',
+    author: '발표자: Arian',
+  },
+  {
+    id: 2, type: 'three-col',
+    badge: 'THE PROBLEM',
+    title: '하이라이트의 함정',
+    subtitle: '읽었지만 남지 않는 지식들',
+    points: [
+      { icon: 'archive',
+        title: '디지털 쓰레기통',
+        desc: '저장은 하지만 꺼내지 않는 하이라이트들. Readwise는 어느 순간 지식의 무덤이 되어 있었다.' },
+      { icon: 'eye',
+        title: '수동적 소비의 착각',
+        desc: '읽는 행위와 사유하는 행위는 전혀 다르다. 우리는 저장했다는 이유로 배웠다고 착각한다.' },
+      { icon: 'link',
+        title: '파편화된 지식',
+        desc: '연결 없이 홀로 존재하는 인사이트들. 맥락 없는 문장은 지식이 아닌 소음일 뿐이다.' },
+    ],
+  },
+  {
+    id: 3, type: 'pipeline',
+    badge: 'THE ECOSYSTEM',
+    title: 'Ecosystem',
+    subtitle: 'Mac Mini 서버 기반의 지능형 파이프라인',
+    steps: [
+      { icon: 'database', num: '01', title: '수집 (Collect)',
+        desc: 'Readwise API\nHeptabase 메모\nPDF 문서\n→ 매일 새벽 자동 동기화' },
+      { icon: 'cpu', num: '02', title: '연성 (Fusion)',
+        desc: 'Claude AI가 이질적 소스 융합\n80% 중복 자동 제거\n5:5 큐레이션 알고리즘' },
+      { icon: 'send', num: '03', title: '배달 (Deliver)',
+        desc: 'Google Chat 푸시 알림\nNotebookLM 자동 업로드\nDEVONthink 인덱싱' },
+    ],
+  },
+  {
+    id: 4, type: 'dialectic',
+    badge: 'THE LOGIC',
+    title: '사유의 알고리즘',
+    subtitle: '가설(Q1) — 충돌(Q2) — 통찰(Q3) · 변증법적 접근',
+    sections: [
+      { variant: 'q1',
+        label: 'Q1 · CONTEXT & HYPOTHESIS',
+        title: '맥락 분석과 가설',
+        desc: '오늘 정보의 핵심 사실을 정리하고, 비즈니스·삶에 미칠 영향에 대한 검증 가능한 가설을 제시한다.',
+        items: ['핵심 사실 2가지 추출', '단기·장기 영향 가설 도출', '"~할 가능성이 큽니다" 형식으로 명시'] },
+      { variant: 'q2',
+        label: 'Q2 · CONTRAST',
+        title: '관점의 충돌과 대조',
+        desc: '수집된 정보들 사이의 모순, 기존 지식과의 시각 차이를 비판적으로 대조한다.',
+        items: ['소스 간 핵심 모순 도출', '기존 통념과의 시각 충돌', '두 충돌이 동시 성립할 때의 역설'] },
+      { variant: 'q3',
+        label: 'Q3 · ACTIONABLE INSIGHT',
+        title: '실행적 통찰',
+        desc: '가설을 검증하거나 충돌을 해결하기 위한 즉각 행동과 장기 방향성을 제시한다.',
+        items: ['즉각 실행 행동 (시간·방법 포함)', '피해야 할 함정과 오류', '10번: 🔟 Deep Question'] },
+    ],
+  },
+  {
+    id: 5, type: 'output',
+    badge: 'THE OUTPUT',
+    title: 'The 10th Question',
+    subtitle: 'CEO의 뇌를 깨우는 단 하나의 화두',
+    points: [
+      '매일 오전 8시, Google Chat으로 자동 배달',
+      '3-3-4 구조의 10가지 핵심 포인트 (Q1·Q2·Q3)',
+      '10번째는 항상 기존 신념을 흔드는 Deep Question',
+      '링크 한 번으로 제텔카스텐 전략실·원문 즉시 접근',
+    ],
+    mockup: {
+      heading: '🔔 오늘의 생각 공장 가동 보고서',
+      date:    '2026-02-26',
+      sources: '• [로컬] 일기 쓰는 법\n• [Readwise] 기계가 아니라 왜 '내가'…',
+      preview: '• 1. 글쓰기는 기억이 아닌 사유의 도구다…\n• 4. AI 시대에 손글씨 일기가 역설적으로…\n• 7. 오늘 밤 10분, AI 없이 일기 한 단락 쓰기',
+      q10:     '10. 🔟 (Deep Question): 당신이 AI 없이 스스로에게 던질 수 있는 가장 불편한 질문은 무엇인가?',
+    },
+  },
+  {
+    id: 6, type: 'business',
+    badge: 'THE FUTURE',
+    title: 'KMS의 미래',
+    subtitle: '개인의 통찰을 조직의 자산으로',
+    cards: [
+      { icon: 'user',     title: '개인 KMS',        desc: 'CEO의 독서·경험·판단이 날마다 정제되어 축적되는 개인 지식 자산 시스템으로 진화' },
+      { icon: 'users',    title: '팀 단위 확장',     desc: '구성원 각자의 인사이트를 융합해 조직의 집단 지성을 자동으로 구축' },
+      { icon: 'layers',   title: '도메인 특화 AI',   desc: '축적된 의사결정 패턴으로 파인튜닝된 사내 전용 AI 어드바이저 구현' },
+      { icon: 'trending', title: '의사결정 가속',    desc: '과거 판단과 현재 정보를 연결해 더 빠르고 근거 있는 전략 수립 지원' },
+    ],
+  },
+  {
+    id: 7, type: 'closing',
+    badge: 'CLOSING',
+    quote: '"AI는 답을 주지 않습니다.<br>AI는 더 나은 <em>질문</em>을 던질 뿐입니다."',
+    tag: 'THOUGHT FACTORY PROJECT · 2026',
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SVG ICONS
+// ═══════════════════════════════════════════════════════════════════════════
+const SVG = {
+  brain: (s=60) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-1.96-3 2.5 2.5 0 0 1-1.32-4.24 3 3 0 0 1 .34-5.58 2.5 2.5 0 0 1 1.32-4.24A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 1.96-3 2.5 2.5 0 0 0 1.32-4.24 3 3 0 0 0-.34-5.58 2.5 2.5 0 0 0-1.32-4.24A2.5 2.5 0 0 0 14.5 2"/></svg>`,
+  archive: (s=22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>`,
+  eye: (s=22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  link: (s=22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/><line x1="8" y1="2" x2="8" y2="5"/><line x1="2" y1="8" x2="5" y2="8"/><line x1="16" y1="22" x2="16" y2="19"/><line x1="22" y1="16" x2="19" y2="16"/></svg>`,
+  database: (s=24) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>`,
+  cpu: (s=24) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="14" x2="22" y2="14"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="14" x2="4" y2="14"/></svg>`,
+  send: (s=24) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
+  question: (s=36) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+  user: (s=22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+  users: (s=22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+  layers: (s=22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>`,
+  trending: (s=22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`,
+  chevronL: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="15 18 9 12 15 6"/></svg>`,
+  chevronR: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="9 18 15 12 9 6"/></svg>`,
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RENDERERS
+// ═══════════════════════════════════════════════════════════════════════════
+const R = {
+  cover(d) {
+    return `<div class="cover-grid">
+      <div class="icon-hero">
+        <div class="hero-circle">${SVG.brain(88)}</div>
+      </div>
+      <div>
+        <div class="badge">${d.badge}</div>
+        <h1 class="slide-title" style="white-space:pre-line">${d.title}</h1>
+        <div class="divider"></div>
+        <p class="slide-sub">${d.subtitle}</p>
+        <p class="slide-desc" style="margin-top:6px;white-space:pre-line">${d.description}</p>
+        <p class="cover-author">${d.author}</p>
+      </div>
+    </div>`;
+  },
+
+  'three-col'(d) {
+    const cards = d.points.map(p => `
+      <div class="card">
+        <div class="card-icon">${SVG[p.icon]()}</div>
+        <div class="card-title">${p.title}</div>
+        <div class="card-desc">${p.desc}</div>
+      </div>`).join('');
+    return `<div class="wide">
+      <div class="badge">${d.badge}</div>
+      <h1 class="slide-title">${d.title}</h1>
+      <p class="slide-sub">${d.subtitle}</p>
+      <div class="three-col">${cards}</div>
+    </div>`;
+  },
+
+  pipeline(d) {
+    const steps = d.steps.map((s, i) => {
+      const arrow = i < d.steps.length - 1
+        ? `<div class="pipe-arrow">
+             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+               <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+             </svg>
+           </div>` : '';
+      return `<div class="pipe-step">
+        <div class="pipe-num">${s.num}</div>
+        <div class="pipe-icon">${SVG[s.icon](26)}</div>
+        <div class="pipe-title">${s.title}</div>
+        <div class="pipe-desc">${s.desc}</div>
+      </div>${arrow}`;
+    }).join('');
+    return `<div class="wide">
+      <div class="badge">${d.badge}</div>
+      <h1 class="slide-title">${d.title}</h1>
+      <p class="slide-sub">${d.subtitle}</p>
+      <div class="pipeline" style="margin-top:18px">${steps}</div>
+    </div>`;
+  },
+
+  dialectic(d) {
+    const cols = d.sections.map(s => {
+      const items = s.items.map(i => `<div class="dial-item">${i}</div>`).join('');
+      return `<div class="dial-card ${s.variant}">
+        <div class="dial-label">${s.label}</div>
+        <div class="dial-title">${s.title}</div>
+        <div class="dial-desc">${s.desc}</div>
+        <div>${items}</div>
+      </div>`;
+    }).join('');
+    return `<div class="wide">
+      <div class="badge">${d.badge}</div>
+      <h1 class="slide-title">${d.title}</h1>
+      <p class="slide-sub">${d.subtitle}</p>
+      <div class="dialectic" style="margin-top:14px">${cols}</div>
+    </div>`;
+  },
+
+  output(d) {
+    const m = d.mockup;
+    const pts = d.points.map(p => `
+      <div class="output-point">
+        <span class="pt-diamond">◆</span>
+        <span class="pt-text">${p}</span>
+      </div>`).join('');
+    return `<div class="output-grid">
+      <div>
+        <div class="badge">${d.badge}</div>
+        <h1 class="slide-title">${d.title}</h1>
+        <div class="divider"></div>
+        <p class="slide-sub">${d.subtitle}</p>
+        <div class="output-points">${pts}</div>
+      </div>
+      <div class="notif-mock">
+        <div class="notif-bar"></div>
+        <div class="notif-head">
+          <div class="notif-avatar">공</div>
+          <div>
+            <div class="notif-from">생각 공장 Bot</div>
+            <div class="notif-time">오늘 08:03 · Google Chat</div>
+          </div>
+        </div>
+        <div class="notif-body">
+          <span class="nb">${m.heading}</span> <span style="color:var(--muted)">(${m.date})</span>
+          <br><br>
+          <span class="ng">📚 오늘의 출처:</span><br>
+          <span style="white-space:pre-line;font-size:10.5px;color:rgba(255,255,255,0.4)">${m.sources}</span>
+          <br><br>
+          <span class="ng">📝 생각의 정수:</span><br>
+          <span style="white-space:pre-line;font-size:10.5px;color:rgba(255,255,255,0.5)">${m.preview}</span>
+          <div class="nq">${m.q10}</div>
+          <br>
+          <span class="nl">🧠 제텔카스텐 전략실</span>&nbsp;&nbsp;<span class="nl">📄 오늘자 원문</span>
+        </div>
+      </div>
+    </div>`;
+  },
+
+  business(d) {
+    const cards = d.cards.map(c => `
+      <div class="biz-card">
+        <div class="biz-icon">${SVG[c.icon]()}</div>
+        <div>
+          <div class="biz-t">${c.title}</div>
+          <div class="biz-d">${c.desc}</div>
+        </div>
+      </div>`).join('');
+    return `<div class="wide">
+      <div class="badge">${d.badge}</div>
+      <h1 class="slide-title">${d.title}</h1>
+      <p class="slide-sub">${d.subtitle}</p>
+      <div class="biz-grid">${cards}</div>
+    </div>`;
+  },
+
+  closing(d) {
+    return `<div class="closing-wrap">
+      <div class="closing-icon">${SVG.question(38)}</div>
+      <div class="badge">${d.badge}</div>
+      <div class="closing-quote">${d.quote}</div>
+      <div class="closing-tag">${d.tag}</div>
+    </div>`;
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ENGINE
+// ═══════════════════════════════════════════════════════════════════════════
+let cur = 0;
+const N = SLIDE_DATA.length;
+const deck  = document.getElementById('deck');
+const prog  = document.getElementById('progress');
+const cnt   = document.getElementById('counter');
+const dotsEl = document.getElementById('dots');
+
+// Build slides
+SLIDE_DATA.forEach((d, i) => {
+  const el = document.createElement('div');
+  el.className = 'slide';
+  el.id = `s${i}`;
+  el.innerHTML = R[d.type] ? R[d.type](d) : `<p>Slide ${d.id}</p>`;
+  el.style.transform = i === 0 ? 'translateX(0)' : 'translateX(48px)';
+  if (i === 0) { el.classList.add('active'); el.style.transform = 'translateX(0)'; }
+  deck.appendChild(el);
+});
+
+// Build dots
+SLIDE_DATA.forEach((_, i) => {
+  const d = document.createElement('div');
+  d.className = 'dot' + (i === 0 ? ' on' : '');
+  d.addEventListener('click', () => go(i));
+  dotsEl.appendChild(d);
+});
+
+function updateChrome() {
+  prog.style.width = `${((cur + 1) / N) * 100}%`;
+  cnt.textContent  = `${String(cur+1).padStart(2,'0')} / ${String(N).padStart(2,'0')}`;
+  document.querySelectorAll('.dot').forEach((d,i) => d.classList.toggle('on', i === cur));
+  document.getElementById('nav-prev').style.opacity = cur === 0 ? '0.3' : '1';
+  document.getElementById('nav-next').style.opacity = cur === N-1 ? '0.3' : '1';
+}
+
+function go(idx) {
+  if (idx < 0 || idx >= N || idx === cur) return;
+  const forward = idx > cur;
+  const fromEl  = document.getElementById(`s${cur}`);
+  const toEl    = document.getElementById(`s${idx}`);
+
+  // Exit current
+  fromEl.style.transition = 'opacity .42s ease, transform .42s ease';
+  fromEl.style.opacity    = '0';
+  fromEl.style.transform  = forward ? 'translateX(-48px)' : 'translateX(48px)';
+  fromEl.classList.remove('active');
+  fromEl.style.pointerEvents = 'none';
+
+  // Prepare incoming
+  toEl.style.transition = 'none';
+  toEl.style.opacity    = '0';
+  toEl.style.transform  = forward ? 'translateX(48px)' : 'translateX(-48px)';
+  toEl.classList.add('active');
+
+  // Force reflow then animate in
+  toEl.getBoundingClientRect();
+  toEl.style.transition = 'opacity .42s ease, transform .42s ease';
+  toEl.style.opacity    = '1';
+  toEl.style.transform  = 'translateX(0)';
+
+  setTimeout(() => {
+    fromEl.style.transform = forward ? 'translateX(48px)' : 'translateX(-48px)';
+  }, 460);
+
+  cur = idx;
+  updateChrome();
+}
+
+document.getElementById('nav-prev').addEventListener('click', () => go(cur - 1));
+document.getElementById('nav-next').addEventListener('click', () => go(cur + 1));
+
+document.addEventListener('keydown', e => {
+  if (['ArrowRight','ArrowDown',' '].includes(e.key)) { e.preventDefault(); go(cur + 1); }
+  if (['ArrowLeft','ArrowUp'].includes(e.key))        { e.preventDefault(); go(cur - 1); }
+});
+
+let tx = 0;
+document.addEventListener('touchstart', e => tx = e.touches[0].clientX, { passive: true });
+document.addEventListener('touchend',   e => {
+  const d = tx - e.changedTouches[0].clientX;
+  if (Math.abs(d) > 44) d > 0 ? go(cur+1) : go(cur-1);
+}, { passive: true });
+
+updateChrome();
+</script>
+</body>
+</html>

@@ -1,36 +1,7 @@
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-.venv/
-venv/
-ENV/
-
-# PKMS
-.pkms.db
-*.log
-_internal_system/pkms/logs/
-
-# Environment
+*.pyc
 .env
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*~
-
-# Output files
-*.gdoc
-02_Archive/
-99_Legacy_Archive/
-01_Inbox/
-01_Processing/
+_internal_system/pkms/logs/
+INPUT/
+02_Archive/originals/
+02_Archive/sources/

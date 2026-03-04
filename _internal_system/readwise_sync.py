@@ -14,6 +14,10 @@ WEBHOOK_URL    = os.getenv("WEBHOOK_URL")
 INBOX          = os.path.join(BASE_DIR, "01_Inbox")
 STATE_FILE     = os.path.join(BASE_DIR, "_internal_system/pkms/readwise_last_sync.txt")
 
+# ✅ Sync 알림만 차단하는 토글 (동기화/파일생성은 계속)
+#   .env에 SEND_SYNC_WEBHOOK=false 를 넣으면 "동기화 완료" 웹훅만 막힘.
+SEND_SYNC_WEBHOOK = os.getenv("SEND_SYNC_WEBHOOK", "true").lower() not in ("0", "false", "no", "off")
+
 if not READWISE_TOKEN:
     print(f"❌ READWISE_TOKEN 없음. 확인: {ENV_PATH}")
     exit(1)
@@ -24,6 +28,9 @@ HEADERS = {"Authorization": f"Token {READWISE_TOKEN}"}
 
 
 def send_webhook(text: str):
+    # ✅ Readwise sync 알림만 차단
+    if not SEND_SYNC_WEBHOOK:
+        return
     if not WEBHOOK_URL:
         return
     try:
@@ -118,7 +125,6 @@ def highlights_to_md(highlights: list, books: dict) -> dict:
 
 def save_to_inbox(books: dict) -> list:
     saved = []
-    ts    = datetime.now().strftime("%y%m%d_%H%M%S")
 
     for title, data in books.items():
         date_tag   = datetime.now().strftime("%y%m%d")
@@ -179,7 +185,11 @@ def run():
             + (f"\n  … 외 {len(saved)-10}개" if len(saved) > 10 else "")
         )
         send_webhook(msg)
-        print(f"  📡 Webhook 전송")
+        if SEND_SYNC_WEBHOOK:
+            print(f"  📡 Webhook 전송")
+        else:
+            print(f"  🔕 Webhook 차단(SEND_SYNC_WEBHOOK=false) — 동기화/파일생성은 정상 완료")
+
 
 if __name__ == "__main__":
     run()
