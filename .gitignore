@@ -5,3 +5,15 @@ _internal_system/pkms/logs/
 INPUT/
 02_Archive/originals/
 02_Archive/sources/
+# secrets
+_internal_system/pkms/.env
+_internal_system/pkms/*.env
+.env
+*.key
+*.pem
+
+# logs / caches
+_internal_system/pkms/logs/
+__pycache__/
+*.pyc
+.DS_Store
