@@ -259,7 +259,8 @@ def run():
         return
 
     # #질문 태그 감지 → questions.json 자동 등록
-    q_notes = [n for n in new_notes if QUESTION_TAG in n["title"]]
+    q_notes = [n for n in new_notes
+               if QUESTION_TAG in n["title"] or QUESTION_TAG in n["body"]]
     new_questions = []
     for qn in q_notes:
         if register_question(qn["title"], qn["body"]):
