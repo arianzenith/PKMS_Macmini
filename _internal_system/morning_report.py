@@ -18,6 +18,14 @@ from datetime import datetime, timedelta
 from urllib import request as urllib_request
 from urllib.error import URLError
 
+# action_tracker 연결 (선택적 — 없어도 동작)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from action_tracker import get_yesterday_action, save_today_action as _save_action
+    _ACTION_TRACKER = True
+except ImportError:
+    _ACTION_TRACKER = False
+
 from google import genai
 from dotenv import load_dotenv
 
@@ -218,10 +226,16 @@ _TEMPLATE = """오늘의 핵심 판단
 (2~4문장)
 """
 
-def build_prompt(rw_pick: list[dict], memo_pick: list[dict], oth_pick: list[dict]) -> str:
+def build_prompt(rw_pick: list[dict], memo_pick: list[dict], oth_pick: list[dict],
+                 yesterday_action: str = "") -> str:
     rw_block = "\n\n".join(x["content"][:1200] for x in rw_pick) or "(외부소스 없음)"
     memo_block = "\n\n".join(x["content"][:1200] for x in memo_pick) or "(내부메모 없음)"
     oth_block = "\n\n".join(x["content"][:900] for x in oth_pick) or ""
+
+    yesterday_block = (
+        f"\n\n[어제 실행 Action — 오늘 분석에 연속성 반영]\n{yesterday_action}"
+        if yesterday_action else ""
+    )
 
     return (
         "당신은 '생각공장 Thought Factory'의 전략 분석 엔진이다.\n"
@@ -235,6 +249,7 @@ def build_prompt(rw_pick: list[dict], memo_pick: list[dict], oth_pick: list[dict
         f"{memo_block}\n\n"
         "[Source C — 기타(참고)]\n"
         f"{oth_block}"
+        f"{yesterday_block}"
     )
 
 
@@ -356,8 +371,11 @@ def run(dry_run: bool = False):
     print(f"\n[{now.strftime('%Y-%m-%d %H:%M:%S')}] ── 아침 융합 리포트 v3.6 시작{'  [DRY-RUN]' if dry_run else ''}")
     print(f"  📂 선택: Readwise {len(rw_pick)} / 메모 {len(memo_pick)} / 기타 {len(oth_pick)}  (pool {len(pool)})")
 
-    # 4) 프롬프트 → 생성
-    prompt = build_prompt(rw_pick, memo_pick, oth_pick)
+    # 4) 어제 Action 조회 + 프롬프트 생성
+    yesterday_action = get_yesterday_action() if _ACTION_TRACKER else ""
+    if yesterday_action:
+        print(f"  📎 어제 Action 주입됨")
+    prompt = build_prompt(rw_pick, memo_pick, oth_pick, yesterday_action)
     print("  🔄 Gemini 호출 중...")
     body = call_gemini(prompt)
     if not body:
@@ -408,7 +426,11 @@ def run(dry_run: bool = False):
         print("-" * 60)
         return
 
-    # 9) 웹훅 전송: 저장된 텍스트 그대로 (프리뷰만 보내지 않음)
+    # 9) Action 추적 저장
+    if _ACTION_TRACKER:
+        _save_action(full)
+
+    # 10) 웹훅 전송: 저장된 텍스트 그대로 (프리뷰만 보내지 않음)
     send_webhook(full)
     print("  📡 Webhook 전송")
 
