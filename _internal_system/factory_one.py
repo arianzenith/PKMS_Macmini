@@ -16,7 +16,12 @@ import os
 import json
 import random
 import shutil
+import time
 from datetime import datetime
+from urllib import request as urllib_request
+from urllib.error import URLError
+from dotenv import load_dotenv
+from google import genai
 
 # ===============================
 # 경로 설정
@@ -35,6 +40,18 @@ ORIGINALS_DIR = os.path.join(ARCHIVE_DIR, "originals")
 LOG_DIR = os.path.join(BASE_DIR, "_internal_system/pkms/logs")
 
 INDEX_FILE = os.path.join(BASE_DIR, "_internal_system/pkms/processed_index_factory_one.json")
+
+ENV_PATH = os.path.join(BASE_DIR, "_internal_system/pkms/.env")
+load_dotenv(ENV_PATH)
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+WEBHOOK_URL    = os.getenv("WEBHOOK_URL")
+MODEL_ID       = os.getenv("FACTORY_MODEL_ID", "gemini-2.5-pro")
+
+if not GOOGLE_API_KEY:
+    raise SystemExit(f"❌ GOOGLE_API_KEY 없음. 확인: {ENV_PATH}")
+
+client = genai.Client(api_key=GOOGLE_API_KEY)
 
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(SOURCES_DIR, exist_ok=True)
@@ -65,6 +82,66 @@ def log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     print(f"[{ts}] {msg}")
+
+# ===============================
+# Gemini 호출
+# ===============================
+
+def call_gemini(prompt: str) -> str:
+
+    for attempt in range(3):
+
+        try:
+
+            resp = client.models.generate_content(model=MODEL_ID, contents=prompt)
+
+            return (resp.text or "").strip()
+
+        except Exception as e:
+
+            if "429" in str(e):
+
+                wait = 60 * (attempt + 1)
+
+                log(f"⚠️ 429 한도 — {wait}s 대기 ({attempt+1}/3)")
+
+                time.sleep(wait)
+
+                continue
+
+            log(f"❌ Gemini 오류: {e}")
+
+            return ""
+
+    return ""
+
+# ===============================
+# Webhook 전송
+# ===============================
+
+def send_webhook(text: str):
+
+    if not WEBHOOK_URL:
+
+        return
+
+    try:
+
+        data = json.dumps({"text": text}).encode("utf-8")
+
+        req  = urllib_request.Request(
+
+            WEBHOOK_URL, data=data,
+
+            headers={"Content-Type": "application/json"}, method="POST"
+
+        )
+
+        urllib_request.urlopen(req, timeout=10)
+
+    except URLError as e:
+
+        log(f"⚠️ Webhook 실패: {e}")
 
 # ===============================
 # processed index
