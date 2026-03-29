@@ -17,3 +17,9 @@ _internal_system/pkms/logs/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Qdrant 바이너리 및 데이터
+_internal_system/qdrant
+qdrant_data/
+qdrant_storage/
+.qdrant-initialized
