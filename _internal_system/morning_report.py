@@ -13,7 +13,7 @@ morning_report.py — Thought Factory 아침 리포트 엔진 v3.6 (STABLE)
 - python3 morning_report.py --dry-run
 """
 
-import os, json, glob, re, sys, time
+import os, json, glob, re, sys, time, subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib import request as urllib_request
@@ -63,6 +63,10 @@ REPORT_LIMIT    = int(os.getenv("MORNING_REPORT_LIMIT", "3000"))
 NOTEBOOKLM_SOURCES_URL = os.getenv(
     "NOTEBOOKLM_SOURCES_URL",
     "https://notebooklm.google.com/notebook/b67639c2-e8f8-4af2-a686-4e91d27875e3?authuser=1"
+)
+NOTEBOOKLM_NOTEBOOK_ID = os.getenv(
+    "NOTEBOOKLM_NOTEBOOK_ID",
+    "b67639c2-e8f8-4af2-a686-4e91d27875e3"
 )
 
 FOOTER = f"\n\n🎯 <{NOTEBOOKLM_SOURCES_URL}|제텔카스텐 전략실로 바로가기>"
@@ -373,7 +377,28 @@ def tail_preserving_trim(full: str, limit: int) -> str:
 
 
 # ───────────────────────────────────────────────────────────
-# 6) 웹훅
+# 6) NotebookLM 소스 등록
+# ───────────────────────────────────────────────────────────
+
+def push_to_notebooklm(report_text: str, notebook_id: str):
+    """보고서를 NotebookLM 소스로 자동 등록 (nlm CLI 사용)"""
+    try:
+        result = subprocess.run(
+            ["nlm", "source", "add", notebook_id,
+             "--text", report_text[:50000],
+             "--title", f"아침융합리포트_{datetime.now().strftime('%y%m%d')}"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            print("  📓 NotebookLM 소스 등록 완료")
+        else:
+            print(f"  ⚠️ NotebookLM 실패: {result.stderr[:100]}")
+    except Exception as e:
+        print(f"  ⚠️ NotebookLM 오류: {e}")
+
+
+# ───────────────────────────────────────────────────────────
+# 7) 웹훅
 # ───────────────────────────────────────────────────────────
 
 def send_webhook(text: str):
@@ -504,7 +529,10 @@ def run(dry_run: bool = False):
         except Exception as e:
             print(f"  ⚠️ DEVONthink 오류: {e} (계속 진행)")
 
-    # 11) 웹훅 전송: 저장된 텍스트 그대로 (프리뷰만 보내지 않음)
+    # 11) NotebookLM 소스 등록 (전문 — 웹훅 절단 전 원본)
+    push_to_notebooklm(full_uncut, NOTEBOOKLM_NOTEBOOK_ID)
+
+    # 12) 웹훅 전송: 저장된 텍스트 그대로 (프리뷰만 보내지 않음)
     send_webhook(full)
     print("  📡 Webhook 전송")
 
