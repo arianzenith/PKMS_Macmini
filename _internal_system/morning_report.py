@@ -14,9 +14,17 @@ morning_report.py — Thought Factory 아침 리포트 엔진 v3.6 (STABLE)
 """
 
 import os, json, glob, re, sys, time
+from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib import request as urllib_request
 from urllib.error import URLError
+
+# retriever 연결 (선택적 — Qdrant 없어도 동작)
+try:
+    from retriever import search_by_questions as _search_by_q
+    _RETRIEVER = True
+except ImportError:
+    _RETRIEVER = False
 
 # action_tracker 연결 (선택적 — 없어도 동작)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
@@ -226,6 +234,39 @@ _TEMPLATE = """오늘의 핵심 판단
 (2~4문장)
 """
 
+def build_prompt_with_questions(q_sources: list[dict], yesterday_action: str = "") -> str:
+    """질문 레지스트리 기반 프롬프트 — 질문별 소스 충돌 구조"""
+    # 질문별 그룹핑
+    groups: dict[str, list] = defaultdict(list)
+    for s in q_sources:
+        groups[s["question"]].append(s)
+
+    q_list = "\n".join(f"• {q}" for q in groups)
+    sources_block = ""
+    for q, sources in groups.items():
+        sources_block += f"\n[검색 질문: {q}]\n"
+        for s in sources:
+            sources_block += f"— {s['fname']} ({s['source_type']}, 유사도 {s['score']:.3f})\n"
+            sources_block += f"{s['content'][:900].strip()}\n\n"
+
+    yesterday_block = (
+        f"\n[어제 실행 Action — 오늘 분석에 연속성 반영]\n{yesterday_action}"
+        if yesterday_action else ""
+    )
+
+    return (
+        "당신은 '생각공장 Thought Factory'의 전략 분석 엔진이다.\n"
+        "아래 전략 질문들을 렌즈로 삼아 관련 소스를 충돌시키고 "
+        "'실행 가능한 의사결정 시스템'을 위한 보고서를 작성하라.\n\n"
+        f"{_RULES}\n\n"
+        f"{_TEMPLATE}\n\n"
+        f"[오늘의 전략 질문]\n{q_list}\n\n"
+        f"[질문별 관련 소스 — 서로 다른 질문의 소스끼리 충돌시킬 것]\n"
+        f"{sources_block}"
+        f"{yesterday_block}"
+    )
+
+
 def build_prompt(rw_pick: list[dict], memo_pick: list[dict], oth_pick: list[dict],
                  yesterday_action: str = "") -> str:
     rw_block = "\n\n".join(x["content"][:1200] for x in rw_pick) or "(외부소스 없음)"
@@ -371,11 +412,25 @@ def run(dry_run: bool = False):
     print(f"\n[{now.strftime('%Y-%m-%d %H:%M:%S')}] ── 아침 융합 리포트 v3.6 시작{'  [DRY-RUN]' if dry_run else ''}")
     print(f"  📂 선택: Readwise {len(rw_pick)} / 메모 {len(memo_pick)} / 기타 {len(oth_pick)}  (pool {len(pool)})")
 
-    # 4) 어제 Action 조회 + 프롬프트 생성
+    # 4) 어제 Action 조회
     yesterday_action = get_yesterday_action() if _ACTION_TRACKER else ""
     if yesterday_action:
         print(f"  📎 어제 Action 주입됨")
-    prompt = build_prompt(rw_pick, memo_pick, oth_pick, yesterday_action)
+
+    # 5) 질문 레지스트리 기반 검색 (우선) → 폴백: 기존 풀 방식
+    prompt = None
+    if _RETRIEVER:
+        try:
+            q_sources = _search_by_q(top_per_q=3)
+            if q_sources:
+                q_count = len(set(s["question_id"] for s in q_sources))
+                print(f"  🎯 질문 기반 검색: 소스 {len(q_sources)}개 (질문 {q_count}개)")
+                prompt = build_prompt_with_questions(q_sources, yesterday_action)
+        except Exception as e:
+            print(f"  ⚠️ 질문 검색 실패, 기본 풀 사용: {e}")
+
+    if prompt is None:
+        prompt = build_prompt(rw_pick, memo_pick, oth_pick, yesterday_action)
     print("  🔄 Gemini 호출 중...")
     body = call_gemini(prompt)
     if not body:
