@@ -34,6 +34,13 @@ try:
 except ImportError:
     _ACTION_TRACKER = False
 
+# devonthink_sync 연결 (선택적 — 없어도 동작)
+try:
+    from devonthink_sync import save_morning_report as _dt_save
+    _DEVONTHINK = True
+except ImportError:
+    _DEVONTHINK = False
+
 from google import genai
 from dotenv import load_dotenv
 
@@ -455,7 +462,8 @@ def run(dry_run: bool = False):
 
     full = header + "\n" + source_header + "\n\n" + body + FOOTER
 
-    # 6) 길이 제한(구글챗)을 고려한 절단: 뒤 보존
+    # 6) 길이 제한(구글챗)을 고려한 절단: 뒤 보존 (DEVONthink엔 전문 저장)
+    full_uncut = full
     full = tail_preserving_trim(full, REPORT_LIMIT)
 
     # 7) 저장
@@ -485,7 +493,18 @@ def run(dry_run: bool = False):
     if _ACTION_TRACKER:
         _save_action(full)
 
-    # 10) 웹훅 전송: 저장된 텍스트 그대로 (프리뷰만 보내지 않음)
+    # 10) DEVONthink 저장 (전문 보존 — 웹훅 절단 전 원본)
+    if _DEVONTHINK:
+        try:
+            dt_uuid = _dt_save(full_uncut, date_tag)
+            if dt_uuid:
+                print(f"  📂 DEVONthink 저장 → UUID: {dt_uuid}")
+            else:
+                print("  ⚠️ DEVONthink 저장 실패 (계속 진행)")
+        except Exception as e:
+            print(f"  ⚠️ DEVONthink 오류: {e} (계속 진행)")
+
+    # 11) 웹훅 전송: 저장된 텍스트 그대로 (프리뷰만 보내지 않음)
     send_webhook(full)
     print("  📡 Webhook 전송")
 
