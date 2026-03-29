@@ -9,10 +9,12 @@ BASE_DIR    = "/Users/arian/GDrive/NotebookLM_Staging"
 ENV_PATH    = os.path.join(BASE_DIR, "_internal_system/pkms/.env")
 load_dotenv(ENV_PATH)
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-INBOX       = os.path.join(BASE_DIR, "01_Inbox")
-STATE_FILE  = os.path.join(BASE_DIR, "_internal_system/pkms/applenotes_last_sync.txt")
-FOLDER_NAME = "00_생각공장"
+WEBHOOK_URL     = os.getenv("WEBHOOK_URL")
+INBOX           = os.path.join(BASE_DIR, "01_Inbox")
+STATE_FILE      = os.path.join(BASE_DIR, "_internal_system/pkms/applenotes_last_sync.txt")
+QUESTIONS_FILE  = os.path.join(BASE_DIR, "_internal_system/pkms/questions.json")
+FOLDER_NAME     = "00_생각공장"
+QUESTION_TAG    = "#질문"
 
 os.makedirs(INBOX, exist_ok=True)
 
@@ -154,13 +156,63 @@ end tell
         return []
 
 
+# ── 질문 등록 ─────────────────────────────────────────────
+def register_question(title: str, body: str) -> bool:
+    """
+    #질문 태그가 포함된 메모를 questions.json에 자동 등록.
+    제목에서 #질문 제거 후 질문 텍스트로 사용.
+    이미 동일한 질문이 있으면 건너뜀. 새로 등록 시 True 반환.
+    """
+    question_text = title.replace(QUESTION_TAG, "").strip()
+    if not question_text:
+        question_text = body[:80].strip()
+
+    # 기존 질문 로드
+    if os.path.exists(QUESTIONS_FILE):
+        with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        data = {"active": []}
+
+    active = data.get("active", [])
+
+    # 중복 체크
+    for q in active:
+        if q.get("question") == question_text:
+            print(f"  ↩️  이미 등록된 질문: {question_text[:40]}")
+            return False
+
+    # 새 ID 생성 (q001, q002, ...)
+    existing_ids = [q.get("id", "") for q in active]
+    num = 1
+    while f"q{num:03d}" in existing_ids:
+        num += 1
+    new_id = f"q{num:03d}"
+
+    active.append({
+        "id":       new_id,
+        "question": question_text,
+        "created":  datetime.now().strftime("%Y-%m-%d"),
+        "weight":   1.0,
+    })
+    data["active"] = active
+
+    os.makedirs(os.path.dirname(QUESTIONS_FILE), exist_ok=True)
+    with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    print(f"  ❓ 질문 등록 [{new_id}]: {question_text[:50]}")
+    return True
+
+
 # ── 01_Inbox 저장 ──────────────────────────────────────────
 def save_to_inbox(notes: list[dict]) -> list[str]:
     saved = []
     for note in notes:
         date_tag   = datetime.now().strftime("%y%m%d")
         time_tag   = datetime.now().strftime("%H%M%S")
-        safe_title = "".join(c for c in note["title"] if c.isalnum() or c in " _-가-힣")[:30].strip()
+        display_title = note["title"].replace(QUESTION_TAG, "").strip()
+        safe_title = "".join(c for c in display_title if c.isalnum() or c in " _-가-힣")[:30].strip()
         fname      = f"{date_tag}_AppleNotes_{time_tag}_{safe_title}.txt"
         fpath      = os.path.join(INBOX, fname)
 
@@ -173,7 +225,7 @@ def save_to_inbox(notes: list[dict]) -> list[str]:
 
         with open(fpath, "w", encoding="utf-8") as f:
             f.write(
-                f"# {note['title']}\n"
+                f"# {display_title}\n"
                 f"수집일: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
                 f"{note['body']}"
             )
@@ -206,6 +258,14 @@ def run():
         print("  ─ 신규 메모 없음")
         return
 
+    # #질문 태그 감지 → questions.json 자동 등록
+    q_notes = [n for n in new_notes if QUESTION_TAG in n["title"]]
+    new_questions = []
+    for qn in q_notes:
+        if register_question(qn["title"], qn["body"]):
+            clean = qn["title"].replace(QUESTION_TAG, "").strip()
+            new_questions.append(clean)
+
     saved = save_to_inbox(new_notes)
     save_last_sync(now)
 
@@ -216,6 +276,8 @@ def run():
         + "\n".join(f"  • {f}" for f in saved[:10])
         + (f"\n  … 외 {len(saved)-10}개" if len(saved) > 10 else "")
     )
+    if new_questions:
+        msg += f"\n\n❓ 새 질문 {len(new_questions)}개 등록:\n" + "\n".join(f"  • {q}" for q in new_questions)
     send_webhook(msg + footer)
     print(f"  📡 Webhook 전송")
 
