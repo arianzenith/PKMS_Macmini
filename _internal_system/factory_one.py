@@ -161,9 +161,14 @@ def upload_work_files(work_files: list[str]) -> list:
     """업무파일을 Gemini File API로 업로드. 실패 시 건너뜀."""
     uploaded = []
     for fpath in work_files:
+        ext  = os.path.splitext(fpath.lower())[1]
+        mime = WORK_EXT.get(ext, "application/octet-stream")
         try:
             with open(fpath, "rb") as f:
-                uf = client.files.upload(file=f)
+                uf = client.files.upload(
+                    file=f,
+                    config={"mime_type": mime, "display_name": os.path.basename(fpath)},
+                )
             log(f"  📎 업로드 완료: {os.path.basename(fpath)}")
             uploaded.append(uf)
         except Exception as e:
