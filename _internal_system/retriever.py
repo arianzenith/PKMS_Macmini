@@ -55,6 +55,56 @@ def load_questions() -> list[dict]:
     return sorted(questions, key=lambda q: q.get("weight", 0), reverse=True)
 
 
+
+def get_today_question() -> dict | None:
+    """
+    가중치 기반 순환 로테이션으로 오늘의 탐구질문 1개 선택.
+
+    동작 방식:
+    - weight가 높을수록 더 자주 선택
+    - last_used_date가 오래된 질문 우선
+    - 선택 후 last_used_date 업데이트
+    """
+    if not os.path.exists(QUESTIONS_FILE):
+        return None
+
+    with open(QUESTIONS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    active = data.get("active", [])
+    if not active:
+        return None
+
+    from datetime import date, timedelta
+    today = date.today().isoformat()
+
+    # 각 질문의 "다음 사용 예정일" 계산
+    # weight=2.0 → 0.5일마다, weight=1.0 → 1일마다, weight=0.5 → 2일마다
+    candidates = []
+    for q in active:
+        w = max(q.get("weight", 1.0), 0.1)
+        last = q.get("last_used_date", "2000-01-01")
+        last_date = date.fromisoformat(last)
+        interval = 1.0 / w          # weight=2.0 → 0.5일 간격
+        next_due = last_date + timedelta(days=interval)
+        overdue = (date.today() - next_due).days  # 양수일수록 오래됨
+        candidates.append((overdue, q))
+
+    # 가장 오래된(overdue 큰) 질문 선택
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    chosen = candidates[0][1]
+
+    # last_used_date 업데이트
+    for q in active:
+        if q["id"] == chosen["id"]:
+            q["last_used_date"] = today
+            break
+
+    with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return chosen
+
 def search_by_questions(top_per_q: int = 3) -> list[dict]:
     """
     active 질문 각각으로 Qdrant 검색 → 중복 제거 → 질문 태그 포함 반환.

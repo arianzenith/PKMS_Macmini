@@ -157,13 +157,35 @@ end tell
 
 
 # ── 질문 등록 ─────────────────────────────────────────────
+def parse_weight(title: str) -> tuple[str, float]:
+    """
+    제목에서 가중치 숫자 추출.
+    예: "AI 에이전트 #질문2.0"  → ("AI 에이전트", 2.0)
+        "AI 에이전트 #질문0.5"  → ("AI 에이전트", 0.5)
+        "AI 에이전트 #질문"     → ("AI 에이전트", 1.0)  ← 기본값
+    """
+    import re
+    # #질문 뒤에 숫자가 있으면 추출 (예: #질문2.0, #질문0.5)
+    m = re.search(r'#질문(\d+(?:\.\d+)?)', title)
+    weight = float(m.group(1)) if m else 1.0
+
+    # 제목에서 #질문+숫자 제거
+    clean = re.sub(r'#질문\d*(?:\.\d+)?', '', title).strip()
+    return clean, weight
+
+
 def register_question(title: str, body: str) -> bool:
     """
     #질문 태그가 포함된 메모를 questions.json에 자동 등록.
-    제목에서 #질문 제거 후 질문 텍스트로 사용.
+    제목에서 #질문N.N 파싱 → 가중치 설정.
     이미 동일한 질문이 있으면 건너뜀. 새로 등록 시 True 반환.
+
+    사용법:
+      #질문       → weight 1.0 (기본)
+      #질문2.0    → weight 2.0 (중요, 더 자주 탐구)
+      #질문0.5    → weight 0.5 (가끔만 탐구)
     """
-    question_text = title.replace(QUESTION_TAG, "").strip()
+    question_text, weight = parse_weight(title)
     if not question_text:
         question_text = body[:80].strip()
 
@@ -176,10 +198,16 @@ def register_question(title: str, body: str) -> bool:
 
     active = data.get("active", [])
 
-    # 중복 체크
+    # 중복 체크 (이미 있으면 가중치만 업데이트)
     for q in active:
         if q.get("question") == question_text:
-            print(f"  ↩️  이미 등록된 질문: {question_text[:40]}")
+            if q.get("weight") != weight:
+                q["weight"] = weight
+                with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                print(f"  ↩️  가중치 업데이트: {question_text[:40]} → {weight}")
+            else:
+                print(f"  ↩️  이미 등록된 질문: {question_text[:40]}")
             return False
 
     # 새 ID 생성 (q001, q002, ...)
@@ -193,7 +221,7 @@ def register_question(title: str, body: str) -> bool:
         "id":       new_id,
         "question": question_text,
         "created":  datetime.now().strftime("%Y-%m-%d"),
-        "weight":   1.0,
+        "weight":   weight,
     })
     data["active"] = active
 
@@ -201,7 +229,7 @@ def register_question(title: str, body: str) -> bool:
     with open(QUESTIONS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-    print(f"  ❓ 질문 등록 [{new_id}]: {question_text[:50]}")
+    print(f"  ❓ 질문 등록 [{new_id}] weight={weight}: {question_text[:50]}")
     return True
 
 

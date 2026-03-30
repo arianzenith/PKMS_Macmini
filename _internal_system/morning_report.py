@@ -21,7 +21,7 @@ from urllib.error import URLError
 
 # retriever 연결 (선택적 — Qdrant 없어도 동작)
 try:
-    from retriever import search_by_questions as _search_by_q
+    from retriever import search_by_questions as _search_by_q, get_today_question
     _RETRIEVER = True
 except ImportError:
     _RETRIEVER = False
@@ -208,7 +208,8 @@ def compact_source_header(rw_pick: list[dict], memo_pick: list[dict], oth_pick: 
 _RULES = """[절대 규칙 — 위반 시 실패]
 1) 반드시 아래 순서/라벨을 지켜라: 오늘의 핵심 판단 → 1. 거대 가설 → 2. 충돌 지점 → 3. 창발 아이디어 → 오늘 바로 실행 → 10. 파괴적 질문 → [이 질문이 치명적인 이유]
 2) '📚 출처' 섹션은 절대 출력하지 마라. (출처는 시스템이 헤더에서 제공한다)
-3) '오늘 바로 실행'은 반드시 독립 섹션으로 분리하여 아래 4요소를 모두 포함하라:
+3) '오늘의 핵심 판단'은 반드시 → 2줄로만 끝내라. 각 줄은 완전한 문장으로 50자 이내로 압축하라.
+4) '오늘 바로 실행'은 반드시 독립 섹션으로 분리하여 아래 4요소를 모두 포함하라:
    - 다음 행동: (구체적 행동 1개)
    - 완료 조건: (언제 끝난 것으로 볼 것인가)
    - 소요 시간: (예상 소요 시간)
@@ -220,8 +221,8 @@ _RULES = """[절대 규칙 — 위반 시 실패]
 """
 
 _TEMPLATE = """오늘의 핵심 판단
-→ (오늘 전략적으로 판단해야 할 것)
-→ (고려할 리스크 또는 기회)
+→ (핵심 판단 문장 1 — 50자 이내)
+→ (핵심 판단 문장 2 — 50자 이내)
 
 1. 거대 가설
 (여러 자료를 통합한 가장 중요한 구조적 가설 — 최대 3개)
@@ -453,11 +454,31 @@ def run(dry_run: bool = False):
     prompt = None
     if _RETRIEVER:
         try:
-            q_sources = _search_by_q(top_per_q=3)
-            if q_sources:
-                q_count = len(set(s["question_id"] for s in q_sources))
-                print(f"  🎯 질문 기반 검색: 소스 {len(q_sources)}개 (질문 {q_count}개)")
+            # 오늘의 탐구질문 1개 선택 (가중치 기반 순환 로테이션)
+            today_q = get_today_question()
+            if today_q:
+                active_questions = [today_q["question"]]
+                from retriever import search as _search_one
+                hits = _search_one(today_q["question"], top=7)
+                q_sources = [{
+                    "question_id": today_q["id"],
+                    "question":    today_q["question"],
+                    "score":       h.score,
+                    "fname":       h.payload.get("fname", ""),
+                    "source_type": h.payload.get("source_type", "other"),
+                    "content":     h.payload.get("text", ""),
+                } for h in hits]
+                print(f"  🎯 오늘의 탐구질문 [{today_q['id']} w={today_q.get('weight',1.0)}]: {today_q['question'][:40]}")
+                print(f"     소스 {len(q_sources)}개 검색")
                 prompt = build_prompt_with_questions(q_sources, yesterday_action)
+            else:
+                q_sources = _search_by_q(top_per_q=3)
+                if q_sources:
+                    active_questions = list(dict.fromkeys(
+                        s["question"] for s in q_sources
+                    ))
+                    print(f"  🎯 질문 기반 검색: {len(q_sources)}개 소스")
+                    prompt = build_prompt_with_questions(q_sources, yesterday_action)
         except Exception as e:
             print(f"  ⚠️ 질문 검색 실패, 기본 풀 사용: {e}")
 
@@ -479,11 +500,31 @@ def run(dry_run: bool = False):
     out_name = f"{date_tag}_Zettelkasten_{file_tag}_아침융합리포트v3.txt"
     out_path = os.path.join(ARCHIVE, out_name)
 
+    # 탐구질문 첫 번째 active 항목
+    q_line = ""
+    try:
+        import json as _json
+        _qpath = os.path.join(os.path.dirname(__file__), "pkms", "questions.json")
+        with open(_qpath, encoding="utf-8") as _f:
+            _qs = _json.load(_f).get("active", [])
+        if _qs:
+            q_line = f"탐구질문: {_qs[0]['question']}\n"
+    except Exception:
+        pass
+
     header = (
         f"🌅 아침 융합 리포트 v3 [{time_tag}]\n"
         f"소스: Readwise {len(rw_pick)}개 + 메모 {len(memo_pick)}개 + 기타 {len(oth_pick)}개\n"
+        f"{q_line}"
     )
-    source_header = compact_source_header(rw_pick, memo_pick, oth_pick)
+
+    # 전체 출처 목록 (파일명 전체 나열)
+    all_sources = (
+        [x["fname"] for x in rw_pick]
+        + [x["fname"] for x in memo_pick]
+        + [x["fname"] for x in oth_pick]
+    )
+    source_header = "📚 출처\n" + "\n".join(f"- {n}" for n in all_sources)
 
     full = header + "\n" + source_header + "\n\n" + body + FOOTER
 
