@@ -452,6 +452,7 @@ def run(dry_run: bool = False):
 
     # 5) 질문 레지스트리 기반 검색 (우선) → 폴백: 기존 풀 방식
     prompt = None
+    today_q = None  # 헤더에서 참조하기 위해 스코프 밖에서 초기화
     if _RETRIEVER:
         try:
             # 오늘의 탐구질문 1개 선택 (가중치 기반 순환 로테이션)
@@ -500,17 +501,8 @@ def run(dry_run: bool = False):
     out_name = f"{date_tag}_Zettelkasten_{file_tag}_아침융합리포트v3.txt"
     out_path = os.path.join(ARCHIVE, out_name)
 
-    # 탐구질문 첫 번째 active 항목
-    q_line = ""
-    try:
-        import json as _json
-        _qpath = os.path.join(os.path.dirname(__file__), "pkms", "questions.json")
-        with open(_qpath, encoding="utf-8") as _f:
-            _qs = _json.load(_f).get("active", [])
-        if _qs:
-            q_line = f"탐구질문: {_qs[0]['question']}\n"
-    except Exception:
-        pass
+    # 탐구질문: get_today_question()이 선택한 질문 사용
+    q_line = f"탐구질문: {today_q['question']}\n" if today_q else ""
 
     header = (
         f"🌅 아침 융합 리포트 v3 [{time_tag}]\n"
