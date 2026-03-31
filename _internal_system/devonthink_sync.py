@@ -16,12 +16,16 @@ import os
 import sys
 import subprocess
 import tempfile
+import time
 
 # DEVONthink 4 application bundle ID
 DT_APP_ID = "DNtp"
 
 # 기본 저장 그룹 경로 (없으면 자동 생성)
 DEFAULT_GROUP = "/생각공장/보고서"
+
+# 대상 데이터베이스 파일 경로
+DEFAULT_DB_PATH = os.path.expanduser("~/Databases/우리집도서관.dtBase2")
 
 
 # ── AppleScript 실행 헬퍼 ──────────────────────────────────
@@ -48,19 +52,33 @@ def _esc(text: str) -> str:
 
 # ── 핵심 기능 ──────────────────────────────────────────────
 def is_running() -> bool:
-    """DEVONthink 4 실행 중 여부"""
-    ok, out = _run_script('application "DEVONthink 4" is running')
+    """DEVONthink 실행 중 여부 (번들 ID 기준)"""
+    ok, out = _run_script(f'application id "{DT_APP_ID}" is running')
     return ok and out.lower() == "true"
+
+
+def _ensure_running(wait: int = 8) -> None:
+    """DEVONthink이 실행 중이 아니면 기동하고 wait초 대기."""
+    if not is_running():
+        subprocess.Popen(
+            ["open", "-a", "/Applications/DEVONthink.app"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        time.sleep(wait)
 
 
 def save_report(title: str, body: str,
                 tags: list[str] | None = None,
-                group_path: str = DEFAULT_GROUP) -> str | None:
+                group_path: str = DEFAULT_GROUP,
+                db_path: str = DEFAULT_DB_PATH) -> str | None:
     """
     DEVONthink 4에 마크다운 레코드로 보고서 저장.
     본문을 임시 파일로 전달하여 큰따옴표·특수문자 이스케이프 문제를 우회.
+    db_path로 대상 DB를 명시적으로 지정하여 Inbox 저장 방지.
     반환: UUID 문자열 또는 None(실패)
     """
+    _ensure_running()  # cron 환경에서 앱이 닫혀 있을 경우 자동 기동
+
     # 본문을 임시 파일에 저장
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".md", encoding="utf-8", delete=False
@@ -70,9 +88,10 @@ def save_report(title: str, body: str,
         tmp.close()
         tmp_path = tmp.name
 
-        safe_title = _esc(title.replace("\n", " "))
-        safe_group = _esc(group_path)
-        safe_path  = _esc(tmp_path)
+        safe_title  = _esc(title.replace("\n", " "))
+        safe_group  = _esc(group_path)
+        safe_path   = _esc(tmp_path)
+        safe_db     = _esc(db_path)
 
         tags_line = ""
         if tags:
@@ -80,8 +99,9 @@ def save_report(title: str, body: str,
             tags_line = f"set tags of theRecord to {{{tags_str}}}"
 
         script = f'''tell application id "{DT_APP_ID}"
+    set theDB to open database "{safe_db}"
     set bodyText to do shell script "cat " & quoted form of "{safe_path}"
-    set theGroup to create location "{safe_group}"
+    set theGroup to create location "{safe_group}" in theDB
     set theRecord to create record with {{name:"{safe_title}", type:markdown, content:bodyText}} in theGroup
     {tags_line}
     return uuid of theRecord

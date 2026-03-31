@@ -13,7 +13,7 @@ morning_report.py — Thought Factory 아침 리포트 엔진 v3.6 (STABLE)
 - python3 morning_report.py --dry-run
 """
 
-import os, json, glob, re, sys, time, subprocess
+import os, json, glob, re, sys, time, subprocess, shutil
 from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib import request as urllib_request
@@ -384,8 +384,9 @@ def tail_preserving_trim(full: str, limit: int) -> str:
 def push_to_notebooklm(report_text: str, notebook_id: str):
     """보고서를 NotebookLM 소스로 자동 등록 (nlm CLI 사용)"""
     try:
+        nlm_bin = shutil.which("nlm") or "/Library/Frameworks/Python.framework/Versions/3.14/bin/nlm"
         result = subprocess.run(
-            ["nlm", "source", "add", notebook_id,
+            [nlm_bin, "source", "add", notebook_id,
              "--text", report_text[:50000],
              "--title", f"아침융합리포트_{datetime.now().strftime('%y%m%d')}"],
             capture_output=True, text=True, timeout=30
