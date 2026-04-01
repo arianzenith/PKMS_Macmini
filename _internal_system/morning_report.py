@@ -453,7 +453,8 @@ def run(dry_run: bool = False):
 
     # 5) 질문 레지스트리 기반 검색 (우선) → 폴백: 기존 풀 방식
     prompt = None
-    today_q = None  # 헤더에서 참조하기 위해 스코프 밖에서 초기화
+    today_q = None    # 헤더에서 참조하기 위해 스코프 밖에서 초기화
+    q_sources = []    # 출처 표시에서 참조하기 위해 스코프 밖에서 초기화
     if _RETRIEVER:
         try:
             # 오늘의 탐구질문 1개 선택 (가중치 기반 순환 로테이션)
@@ -511,13 +512,23 @@ def run(dry_run: bool = False):
         f"{q_line}"
     )
 
-    # 전체 출처 목록 (파일명 전체 나열)
-    all_sources = (
-        [x["fname"] for x in rw_pick]
-        + [x["fname"] for x in memo_pick]
-        + [x["fname"] for x in oth_pick]
-    )
-    source_header = "📚 출처\n" + "\n".join(f"- {n}" for n in all_sources)
+    # 출처: q_sources가 있으면 탐구질문 기반 소스, 없으면 최신 파일
+    if q_sources:
+        seen = set()
+        src_names = []
+        for s in q_sources:
+            fname = s.get("fname", "")
+            if fname and fname not in seen:
+                seen.add(fname)
+                src_names.append(fname)
+        source_header = "📚 출처\n" + "\n".join(f"• {n}" for n in src_names)
+    else:
+        all_sources = (
+            [x["fname"] for x in rw_pick]
+            + [x["fname"] for x in memo_pick]
+            + [x["fname"] for x in oth_pick]
+        )
+        source_header = "📚 출처\n" + "\n".join(f"• {n}" for n in all_sources)
 
     full = header + "\n" + source_header + "\n\n" + body + FOOTER
 
