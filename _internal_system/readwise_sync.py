@@ -128,9 +128,8 @@ def save_to_inbox(books: dict) -> list:
 
     for title, data in books.items():
         date_tag   = datetime.now().strftime("%y%m%d")
-        time_tag   = datetime.now().strftime("%H%M%S")
-        safe_title = "".join(c for c in title if c.isalnum() or c in " _-가-힣")[:30].strip()
-        fname      = f"{date_tag}_Readwise_{time_tag}_{safe_title}.txt"
+        safe_title = "".join(c for c in title if c.isalnum() or c in " _-가-힣")[:50].strip()
+        fname      = f"{date_tag}_Readwise_{safe_title}.txt"
         fpath      = os.path.join(INBOX, fname)
 
         lines = [

@@ -127,17 +127,16 @@ def fetch_updated_cards(last_sync: str) -> list[dict]:
 def save_card(card: dict) -> str:
     """카드를 sources/ 에 txt 파일로 저장. 파일명 반환."""
     date_tag  = datetime.now().strftime("%y%m%d")
-    time_tag  = datetime.now().strftime("%H%M%S")
     safe_title = "".join(
         c for c in card["title"] if c.isalnum() or c in " _-가-힣"
-    )[:30].strip()
-    fname  = f"{date_tag}_Heptabase_{time_tag}_{safe_title}.txt"
+    )[:50].strip()
+    fname  = f"{date_tag}_Heptabase_{safe_title}.txt"
     fpath  = os.path.join(SOURCES_DIR, fname)
 
     # 중복 방지
     counter = 1
     while os.path.exists(fpath):
-        fname  = f"{date_tag}_Heptabase_{time_tag}_{safe_title}_{counter}.txt"
+        fname  = f"{date_tag}_Heptabase_{safe_title}_{counter}.txt"
         fpath  = os.path.join(SOURCES_DIR, fname)
         counter += 1
 

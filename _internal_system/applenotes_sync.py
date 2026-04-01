@@ -238,16 +238,18 @@ def save_to_inbox(notes: list[dict]) -> list[str]:
     saved = []
     for note in notes:
         date_tag   = datetime.now().strftime("%y%m%d")
-        time_tag   = datetime.now().strftime("%H%M%S")
         display_title = note["title"].replace(QUESTION_TAG, "").strip()
-        safe_title = "".join(c for c in display_title if c.isalnum() or c in " _-가-힣")[:30].strip()
-        fname      = f"{date_tag}_AppleNotes_{time_tag}_{safe_title}.txt"
+        # 제목 없으면 본문 첫 줄 사용
+        if not display_title:
+            display_title = note["body"].strip().split("\n")[0][:50] or "메모"
+        safe_title = "".join(c for c in display_title if c.isalnum() or c in " _-가-힣")[:50].strip()
+        fname      = f"{date_tag}_AppleNotes_{safe_title}.txt"
         fpath      = os.path.join(INBOX, fname)
 
-        # 파일명 중복 방지 (같은 초에 여러 메모 저장 시)
+        # 중복 방지
         counter = 1
         while os.path.exists(fpath):
-            fname  = f"{date_tag}_AppleNotes_{time_tag}_{safe_title}_{counter}.txt"
+            fname  = f"{date_tag}_AppleNotes_{safe_title}_{counter}.txt"
             fpath  = os.path.join(INBOX, fname)
             counter += 1
 
