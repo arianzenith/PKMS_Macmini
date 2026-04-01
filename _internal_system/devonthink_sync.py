@@ -57,11 +57,11 @@ def is_running() -> bool:
     return ok and out.lower() == "true"
 
 
-def _ensure_running(wait: int = 8) -> None:
-    """DEVONthink이 실행 중이 아니면 기동하고 wait초 대기."""
+def _ensure_running(wait: int = 15) -> None:
+    """DEVONthink이 실행 중이 아니면 osascript로 기동하고 wait초 대기."""
     if not is_running():
         subprocess.Popen(
-            ["open", "-a", "/Applications/DEVONthink.app"],
+            ["osascript", "-e", f'tell application id "{DT_APP_ID}" to activate'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         time.sleep(wait)
