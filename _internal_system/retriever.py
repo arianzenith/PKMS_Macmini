@@ -105,6 +105,93 @@ def get_today_question() -> dict | None:
 
     return chosen
 
+
+def search_mixed(query: str,
+                 readwise_n: int = 2,
+                 heptabase_n: int = 3,
+                 applenotes_n: int = 2) -> list[dict]:
+    """
+    탐구질문으로 Qdrant 검색 후 source_type별 강제 믹싱.
+    - readwise    최대 readwise_n개
+    - heptabase   최대 heptabase_n개
+    - applenotes  최대 applenotes_n개
+    총 목표: 7개 (기본값 기준)
+
+    같은 주제끼리만 모이는 문제 해결 → 이질 소스 충돌 보장.
+    각 타입에서 유사도 높은 것부터 채우되, 부족하면 다른 타입으로 보충.
+    """
+    # 충분히 많이 검색 후 타입별로 분류
+    hits = search(query, top=30)
+
+    by_type = defaultdict(list)
+    for h in hits:
+        stype = h.payload.get("source_type", "other")
+        # heptabase는 memo 타입으로도 저장되는 경우 있음
+        fname = h.payload.get("fname", "").upper()
+        if "HEPTABASE" in fname:
+            stype = "heptabase"
+        elif "READWISE" in fname:
+            stype = "readwise"
+        elif "APPLENOTES" in fname or "APPLE_NOTES" in fname:
+            stype = "applenotes"
+        by_type[stype].append(h)
+
+    # 타입별 할당량만큼 선택
+    quota = {
+        "readwise":   readwise_n,
+        "heptabase":  heptabase_n,
+        "applenotes": applenotes_n,
+    }
+    selected = []
+    used_ids = set()
+
+    for stype, n in quota.items():
+        candidates = by_type.get(stype, [])
+        count = 0
+        for h in candidates:
+            if count >= n:
+                break
+            if h.id in used_ids:
+                continue
+            used_ids.add(h.id)
+            selected.append({
+                "question_id": "today",
+                "question":    query,
+                "score":       h.score,
+                "fname":       h.payload.get("fname", ""),
+                "source_type": stype,
+                "content":     h.payload.get("text", ""),
+            })
+            count += 1
+
+    # 할당량 못 채운 자리는 남은 hits로 보충 (유사도 순)
+    total_target = readwise_n + heptabase_n + applenotes_n
+    if len(selected) < total_target:
+        for h in hits:
+            if len(selected) >= total_target:
+                break
+            if h.id in used_ids:
+                continue
+            used_ids.add(h.id)
+            stype = h.payload.get("source_type", "other")
+            fname = h.payload.get("fname", "").upper()
+            if "HEPTABASE" in fname:
+                stype = "heptabase"
+            elif "READWISE" in fname:
+                stype = "readwise"
+            elif "APPLENOTES" in fname:
+                stype = "applenotes"
+            selected.append({
+                "question_id": "today",
+                "question":    query,
+                "score":       h.score,
+                "fname":       h.payload.get("fname", ""),
+                "source_type": stype,
+                "content":     h.payload.get("text", ""),
+            })
+
+    return selected
+
 def search_by_questions(top_per_q: int = 3) -> list[dict]:
     """
     active 질문 각각으로 Qdrant 검색 → 중복 제거 → 질문 태그 포함 반환.

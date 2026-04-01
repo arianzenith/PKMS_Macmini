@@ -21,7 +21,7 @@ from urllib.error import URLError
 
 # retriever 연결 (선택적 — Qdrant 없어도 동작)
 try:
-    from retriever import search_by_questions as _search_by_q, get_today_question
+    from retriever import search_by_questions as _search_by_q, get_today_question, search_mixed as _search_mixed
     _RETRIEVER = True
 except ImportError:
     _RETRIEVER = False
@@ -461,18 +461,12 @@ def run(dry_run: bool = False):
             today_q = get_today_question()
             if today_q:
                 active_questions = [today_q["question"]]
-                from retriever import search as _search_one
-                hits = _search_one(today_q["question"], top=7)
-                q_sources = [{
-                    "question_id": today_q["id"],
-                    "question":    today_q["question"],
-                    "score":       h.score,
-                    "fname":       h.payload.get("fname", ""),
-                    "source_type": h.payload.get("source_type", "other"),
-                    "content":     h.payload.get("text", ""),
-                } for h in hits]
+                # search_mixed: readwise 2 + heptabase 3 + applenotes 2 강제 믹싱
+                q_sources = _search_mixed(today_q["question"])
+                from collections import Counter as _Counter
+                type_dist = dict(_Counter(s["source_type"] for s in q_sources))
                 print(f"  🎯 오늘의 탐구질문 [{today_q['id']} w={today_q.get('weight',1.0)}]: {today_q['question'][:40]}")
-                print(f"     소스 {len(q_sources)}개 검색")
+                print(f"     소스 {len(q_sources)}개 {type_dist}")
                 prompt = build_prompt_with_questions(q_sources, yesterday_action)
             else:
                 q_sources = _search_by_q(top_per_q=3)
