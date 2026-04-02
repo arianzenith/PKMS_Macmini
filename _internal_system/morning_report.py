@@ -461,8 +461,8 @@ def run(dry_run: bool = False):
             today_q = get_today_question()
             if today_q:
                 active_questions = [today_q["question"]]
-                # search_mixed: readwise 2 + heptabase 3 + applenotes 2 강제 믹싱
-                q_sources = _search_mixed(today_q["question"])
+                # search_mixed: readwise 3 + heptabase 2 + applenotes 2 강제 믹싱
+                q_sources = _search_mixed(today_q["question"], readwise_n=3, heptabase_n=2, applenotes_n=2)
                 from collections import Counter as _Counter
                 type_dist = dict(_Counter(s["source_type"] for s in q_sources))
                 print(f"  🎯 오늘의 탐구질문 [{today_q['id']} w={today_q.get('weight',1.0)}]: {today_q['question'][:40]}")

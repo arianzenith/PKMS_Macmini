@@ -57,14 +57,31 @@ def is_running() -> bool:
     return ok and out.lower() == "true"
 
 
-def _ensure_running(wait: int = 15) -> None:
-    """DEVONthink이 실행 중이 아니면 osascript로 기동하고 wait초 대기."""
-    if not is_running():
-        subprocess.Popen(
-            ["osascript", "-e", f'tell application id "{DT_APP_ID}" to activate'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        time.sleep(wait)
+def _ensure_running(max_wait: int = 60) -> None:
+    """
+    DEVONthink이 실행 중이 아니면 기동 후 실제 응답할 때까지 폴링.
+    고정 대기 대신 2초 간격으로 최대 max_wait초까지 확인.
+    """
+    if is_running():
+        return
+
+    subprocess.Popen(
+        ["osascript", "-e", f'tell application id "{DT_APP_ID}" to activate'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    # 실제 응답 가능할 때까지 폴링 (최대 max_wait초)
+    interval = 2
+    elapsed  = 0
+    while elapsed < max_wait:
+        time.sleep(interval)
+        elapsed += interval
+        if is_running():
+            time.sleep(3)  # 완전 초기화 여유 시간
+            print(f"  ✅ DEVONthink 기동 완료 ({elapsed}초 소요)")
+            return
+
+    print(f"  ⚠️  DEVONthink {max_wait}초 내 응답 없음 — 저장 시도 계속")
 
 
 def save_report(title: str, body: str,
