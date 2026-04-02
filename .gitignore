@@ -30,3 +30,12 @@ qdrant_storage/
 02_Archive/sources/*.txt
 02_Archive/originals/
 INPUT/
+
+# 운영 상태 파일
+_internal_system/pkms/action_history.json
+_internal_system/pkms/applenotes_last_sync.txt
+_internal_system/pkms/heptabase_last_sync.txt
+_internal_system/pkms/readwise_last_sync.txt
+_internal_system/pkms/processed_index*.json
+_internal_system/pkms/vector_index_state.json
+_internal_system/pkms/questions.json
