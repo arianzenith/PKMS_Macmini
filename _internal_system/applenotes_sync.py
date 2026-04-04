@@ -10,7 +10,7 @@ ENV_PATH    = os.path.join(BASE_DIR, "_internal_system/pkms/.env")
 load_dotenv(ENV_PATH)
 
 WEBHOOK_URL     = os.getenv("WEBHOOK_URL")
-INBOX           = os.path.join(BASE_DIR, "01_Inbox")
+INBOX = os.path.join(BASE_DIR, "02_Archive/sources")
 STATE_FILE      = os.path.join(BASE_DIR, "_internal_system/pkms/applenotes_last_sync.txt")
 QUESTIONS_FILE  = os.path.join(BASE_DIR, "_internal_system/pkms/questions.json")
 FOLDER_NAME     = "00_생각공장"

@@ -11,7 +11,7 @@ load_dotenv(ENV_PATH)
 
 READWISE_TOKEN = os.getenv("READWISE_TOKEN")
 WEBHOOK_URL    = os.getenv("WEBHOOK_URL")
-INBOX          = os.path.join(BASE_DIR, "01_Inbox")
+INBOX = os.path.join(BASE_DIR, "02_Archive/sources")
 STATE_FILE     = os.path.join(BASE_DIR, "_internal_system/pkms/readwise_last_sync.txt")
 
 # ✅ Sync 알림만 차단하는 토글 (동기화/파일생성은 계속)
