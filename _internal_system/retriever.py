@@ -148,8 +148,9 @@ def search_mixed(query: str,
     기존 방식(top=30 후 분류)은 Heptabase 독점 문제 발생
     → 각 타입별로 별도 Qdrant 검색 → 할당량 반드시 충족.
     """
-    used_ids = set()
-    selected = []
+    used_ids   = set()
+    used_fnames = set()
+    selected   = []
 
     for stype, n in [("readwise", readwise_n),
                      ("heptabase", heptabase_n),
@@ -159,14 +160,16 @@ def search_mixed(query: str,
         for h in hits:
             if count >= n:
                 break
-            if h.id in used_ids:
+            fname = h.payload.get("fname", "")
+            if h.id in used_ids or fname in used_fnames:
                 continue
             used_ids.add(h.id)
+            used_fnames.add(fname)
             selected.append({
                 "question_id": "today",
                 "question":    query,
                 "score":       h.score,
-                "fname":       h.payload.get("fname", ""),
+                "fname":       fname,
                 "source_type": stype,
                 "content":     h.payload.get("text", ""),
             })
@@ -180,16 +183,18 @@ def search_mixed(query: str,
         for h in hits:
             if len(selected) >= total_target:
                 break
-            if h.id in used_ids:
+            fname = h.payload.get("fname", "")
+            if h.id in used_ids or fname in used_fnames:
                 continue
             used_ids.add(h.id)
+            used_fnames.add(fname)
             stype = h.payload.get("source_type", "other")
-            fname = h.payload.get("fname", "").upper()
-            if "HEPTABASE" in fname:
+            fname_upper = fname.upper()
+            if "HEPTABASE" in fname_upper:
                 stype = "heptabase"
-            elif "READWISE" in fname:
+            elif "READWISE" in fname_upper:
                 stype = "readwise"
-            elif "APPLENOTES" in fname:
+            elif "APPLENOTES" in fname_upper:
                 stype = "applenotes"
             selected.append({
                 "question_id": "today",
