@@ -18,8 +18,8 @@ import subprocess
 import tempfile
 import time
 
-# DEVONthink 4 application bundle ID
-DT_APP_ID = "DNtp"
+# DEVONthink 4 application bundle ID (DT4: com.devon-technologies.think)
+DT_APP_ID = "com.devon-technologies.think"
 
 # 기본 저장 그룹 경로 (없으면 자동 생성)
 DEFAULT_GROUP = "/생각공장/보고서"
