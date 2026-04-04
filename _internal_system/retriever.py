@@ -106,49 +106,57 @@ def get_today_question() -> dict | None:
     return chosen
 
 
+def _search_by_type(query: str, source_type: str, n: int) -> list[dict]:
+    """
+    특정 source_type 파일명 패턴으로 필터링해서 검색.
+    Qdrant payload filter 사용 — 타입별 독립 검색 보장.
+    """
+    from qdrant_client.models import Filter, FieldCondition, MatchText
+    try:
+        vector = embed_query(query)
+        # fname에 소스 키워드가 포함된 것만 필터링
+        keyword_map = {
+            "readwise":   "Readwise",
+            "heptabase":  "Heptabase",
+            "applenotes": "AppleNotes",
+        }
+        keyword = keyword_map.get(source_type, source_type)
+        result = client_qdrant.query_points(
+            collection_name=COLLECTION_NAME,
+            query=vector,
+            query_filter=Filter(
+                must=[FieldCondition(
+                    key="fname",
+                    match=MatchText(text=keyword)
+                )]
+            ),
+            limit=n,
+            with_payload=True,
+        )
+        return result.points
+    except Exception as e:
+        print(f"  ⚠️ {source_type} 필터 검색 실패: {e}")
+        return []
+
+
 def search_mixed(query: str,
-                 readwise_n: int = 2,
-                 heptabase_n: int = 3,
+                 readwise_n: int = 3,
+                 heptabase_n: int = 2,
                  applenotes_n: int = 2) -> list[dict]:
     """
-    탐구질문으로 Qdrant 검색 후 source_type별 강제 믹싱.
-    - readwise    최대 readwise_n개
-    - heptabase   최대 heptabase_n개
-    - applenotes  최대 applenotes_n개
-    총 목표: 7개 (기본값 기준)
-
-    같은 주제끼리만 모이는 문제 해결 → 이질 소스 충돌 보장.
-    각 타입에서 유사도 높은 것부터 채우되, 부족하면 다른 타입으로 보충.
+    타입별 독립 검색으로 source_type 강제 믹싱.
+    기존 방식(top=30 후 분류)은 Heptabase 독점 문제 발생
+    → 각 타입별로 별도 Qdrant 검색 → 할당량 반드시 충족.
     """
-    # 충분히 많이 검색 후 타입별로 분류
-    hits = search(query, top=30)
-
-    by_type = defaultdict(list)
-    for h in hits:
-        stype = h.payload.get("source_type", "other")
-        # heptabase는 memo 타입으로도 저장되는 경우 있음
-        fname = h.payload.get("fname", "").upper()
-        if "HEPTABASE" in fname:
-            stype = "heptabase"
-        elif "READWISE" in fname:
-            stype = "readwise"
-        elif "APPLENOTES" in fname or "APPLE_NOTES" in fname:
-            stype = "applenotes"
-        by_type[stype].append(h)
-
-    # 타입별 할당량만큼 선택
-    quota = {
-        "readwise":   readwise_n,
-        "heptabase":  heptabase_n,
-        "applenotes": applenotes_n,
-    }
-    selected = []
     used_ids = set()
+    selected = []
 
-    for stype, n in quota.items():
-        candidates = by_type.get(stype, [])
+    for stype, n in [("readwise", readwise_n),
+                     ("heptabase", heptabase_n),
+                     ("applenotes", applenotes_n)]:
+        hits = _search_by_type(query, stype, n * 3)  # 여유있게 검색
         count = 0
-        for h in candidates:
+        for h in hits:
             if count >= n:
                 break
             if h.id in used_ids:
@@ -163,10 +171,12 @@ def search_mixed(query: str,
                 "content":     h.payload.get("text", ""),
             })
             count += 1
+        print(f"  📂 {stype}: {count}/{n}개 수집")
 
-    # 할당량 못 채운 자리는 남은 hits로 보충 (유사도 순)
+    # 할당량 못 채운 자리는 전체 검색으로 보충
     total_target = readwise_n + heptabase_n + applenotes_n
     if len(selected) < total_target:
+        hits = search(query, top=30)
         for h in hits:
             if len(selected) >= total_target:
                 break
